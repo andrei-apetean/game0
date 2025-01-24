@@ -8,7 +8,7 @@
 #include "platform.h"
 
 typedef struct platform_wayland_t {
-    struct wl_display*    display;
+    struct wl_display   *display;
     struct wl_registry*   registry;
     struct wl_compositor* compositor;
     struct wl_surface*    surface;

@@ -77,6 +77,9 @@ typedef struct vulkan_t {
     VkDevice                 dev;
     VkQueue                  gfx_queue;
     VkCommandPool            cmd_pool;
+    VkPipeline               pipeline;
+    VkShaderModule           vert_shader;
+    VkShaderModule           frag_shader;
     VkSwapchainKHR           swapchain;
     VkSurfaceFormatKHR       surf_fmt;
     VkPresentModeKHR         present_mode;
@@ -96,6 +99,9 @@ static vulkan_t vulkan = {0};
 bool create_swapchain();
 bool recreate_swapchain();
 void destroy_swapchain();
+
+bool create_shader_module(VkShaderModule* module, const char* file_name);
+bool create_pipeline();
 
 bool render_startup(win_data_t window) {
     printf("render_startup...\n");
@@ -335,6 +341,13 @@ bool render_startup(win_data_t window) {
     if (!create_swapchain()) {
         return false;
     }
+   // if (!create_shader_module(&vulkan.vert_shader, "./shaders/vert.spirv")) {
+   //     return false;
+   // }
+   // if (!create_shader_module(&vulkan.vert_shader, "./shaders/frag.spirv")) {
+   //     return false;
+   // }
+
     printf("render_startup successful!\n");
     return true;
 }
@@ -346,7 +359,7 @@ bool render_update(render_paket_t* paket) {
     VkResult result = vkAcquireNextImageKHR(
         vulkan.dev, vulkan.swapchain, UINT64_MAX, frame.semaphore_render_start,
         VK_NULL_HANDLE, &image_idx);
-    //printf("Current: %d Acquired: %d\n", vulkan.frame_idx, image_idx);
+    // printf("Current: %d Acquired: %d\n", vulkan.frame_idx, image_idx);
     bool should_recreate_sc =
         paket->width != vulkan.width || paket->height != vulkan.height;
     if (result == VK_ERROR_OUT_OF_DATE_KHR || should_recreate_sc) {
@@ -683,4 +696,126 @@ void destroy_swapchain() {
 
     vkDestroyRenderPass(vulkan.dev, vulkan.render_pass, vulkan.alloc);
     vkDestroySwapchainKHR(vulkan.dev, vulkan.swapchain, vulkan.alloc);
+}
+
+bool create_shader_module(VkShaderModule* module, const char* file_name) {
+    FILE* file = fopen(file_name, "rb");
+    if (!file) {
+        printf("Error: Failed to open shader file: %s\n", file_name);
+        return false;
+    }
+
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    uint32_t* code = malloc(size);
+    fread(code, 1, size, file);
+    fclose(file);
+
+    VkShaderModuleCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = size,
+        .pCode = code,
+    };
+
+    if (vkCreateShaderModule(vulkan.dev, &create_info, NULL, module) !=
+        VK_SUCCESS) {
+        printf("Error: Failed to create shader module!\n");
+        free(code);
+        return false;
+    }
+
+    free(code);
+    return true;
+}
+
+bool create_pipeline() {
+    VkPipelineShaderStageCreateInfo vert_shader_stage = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+        .module = vulkan.vert_shader,
+        .pName = "main",
+    };
+
+    VkPipelineShaderStageCreateInfo frag_shader_stage = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .module = vulkan.frag_shader,
+        .pName = "main",
+    };
+
+    VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage,
+                                                       frag_shader_stage};
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 0,
+        .vertexAttributeDescriptionCount = 0,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE,
+    };
+
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .blendEnable = VK_FALSE,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+
+    VkPipelineColorBlendStateCreateInfo color_blending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+    };
+
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 0,
+        .pushConstantRangeCount = 0,
+    };
+
+    VkPipelineLayout pipeline_layout;
+    vkCreatePipelineLayout(vulkan.dev, &pipeline_layout_info, NULL,
+                           &pipeline_layout);
+
+    VkGraphicsPipelineCreateInfo pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2,
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input_info,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blending,
+        .renderPass = vulkan.render_pass,
+        .layout = pipeline_layout,
+    };
+    VkResult result;
+    CHECK_VK_RESULT(vkCreateGraphicsPipelines(
+        vulkan.dev, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &vulkan.pipeline));
+    return true;
 }
