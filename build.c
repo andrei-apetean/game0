@@ -158,55 +158,144 @@ bool recursively_find_file(dir_t* dir, const char* target, char* buff) {
 }
 
 int32_t game_prebuild() {
-    char        xdg_shell_xml[512] = {0};
-    const char* protocols_dir = "/usr/share/wayland-protocols";
-    const char* xdg_shell = "xdg-shell.xml";
-    strcpy(xdg_shell_xml, protocols_dir);
-    if (!file_exists("./external/xdg-shell.h") ||
-        !file_exists("./external/xdg-shell.c")) {
-        dir_t* d = dir_open(protocols_dir);
-        printf("[inf] Searching for %s in %s\n", xdg_shell_xml, protocols_dir);
-        bool xdg_found = recursively_find_file(d, xdg_shell, xdg_shell_xml);
-        free(d);
-        if (xdg_found == false) {
-            printf("[err] Could not find %s in %s\n", xdg_shell, protocols_dir);
-            return -1;
-        }
-        printf("[inf] Found xdg_shell spec: %s\n", xdg_shell_xml);
+    {  // shaders
+        if (!dir_exists("./bin/assets/shaders")) {
+           dir_create("./bin/assets");
+           dir_create("./bin/assets/shaders");
+      }
 
-        const char* cmd1[] = {"wayland-scanner", "--version", NULL};
-        int32_t     ret = process_exec(cmd1);
-        if (ret != 0) {
+        const char* vulkan_sdk = getenv("VULKAN_SDK");
+        if (vulkan_sdk == NULL) {
             printf(
-                "[err] Could not find wayland-scanner in PATH! Quitting...\n");
+                "[err] Failed to find $VULKAN_SDK path!\nMake sure the "
+                "Vulkan "
+                "SDK "
+                "is installed and added to PATH.\nQuitting...\n");
             return -1;
         }
+        const char glslc[PATH_MAX] = {0};
 
-        printf("[inf] Running wayland-scanner...\n");
-        const char* cmd2[] = {"wayland-scanner", "client-header", xdg_shell_xml,
-                              "./external/xdg-shell.h", NULL};
-        const char* cmd3[] = {"wayland-scanner", "private-code", xdg_shell_xml,
-                              "./external/xdg-shell.c", NULL};
+        snprintf((char*)glslc, PATH_MAX, "%s/bin/glslc", vulkan_sdk);
 
-        ret = process_exec(cmd2);
-        if (ret != 0) {
-            printf("[err] Failed to execute wayland-scanner! Quitting...\n");
+        const char shaders_dir[] = "assets/shaders";
+        const char bin_shaders_dir[] = "bin/assets/shaders";
+        const char spv_ext[] = ".spv";
+        const char glsl_ext[] = ".glsl";
+        size_t     shaders_dir_len = sizeof(shaders_dir);
+        size_t     bin_shaders_dir_len = sizeof(bin_shaders_dir);
+        size_t     spv_ext_len = sizeof(spv_ext);
+        size_t     glsl_ext_len = sizeof(glsl_ext);
+
+        dir_t* d = dir_open(shaders_dir);
+        if (d == NULL) {
+            printf("[err] Failed to open shaders directory. Quitting...\n");
             return -1;
         }
+        dirent_t* e = NULL;
+        while ((e = dir_read(d)) != NULL) {
+            // TODO ensure only glsl files get compiled
+            if (!e->is_dir) {
+                // compose the file name
+                char   spv_file[PATH_MAX] = {0};
+                char   glsl_file[PATH_MAX] = {0};
+                size_t glsl_name_len = strlen(e->d_name);
+                size_t spv_name_len = glsl_name_len - glsl_ext_len + 1;
 
-        ret = process_exec(cmd3);
-        if (ret != 0) {
-            printf("[err] Failed to execute wayland-scanner! Quitting...\n");
+                snprintf(spv_file, PATH_MAX, "./%s/%s%s", bin_shaders_dir,
+                         e->d_name, spv_ext);
+
+                snprintf(glsl_file, PATH_MAX, "./%s/%s", shaders_dir,
+                         e->d_name);
+
+                printf("[inf] Compiling %s/%s -> %s ...\n", shaders_dir, e->d_name,
+                       spv_file);
+
+                const char* cmd[] = {
+                    (char*)glslc, glsl_file, "-o", spv_file, NULL,
+                };
+                if (process_exec(cmd) != 0) {
+                    printf("[err] Failed to compile %s! Quitting...\n", e->d_name);
+                    return -1;
+                }
+            }
+        }
+
+        free(d);
+    }
+    {  // xdg shell
+        char        xdg_shell_xml[512] = {0};
+        const char* protocols_dir = "/usr/share/wayland-protocols";
+        const char* xdg_shell = "xdg-shell.xml";
+        strcpy(xdg_shell_xml, protocols_dir);
+        if (!file_exists("./external/xdg-shell.h") ||
+            !file_exists("./external/xdg-shell.c")) {
+            dir_t* d = dir_open(protocols_dir);
+            if (d == NULL) {
+                printf("Failed to open %s. Quitting...", protocols_dir);
+                return -1;
+            }
+            printf("[inf] Searching for %s in %s\n", xdg_shell_xml,
+                   protocols_dir);
+            bool xdg_found = recursively_find_file(d, xdg_shell, xdg_shell_xml);
+            free(d);
+            if (xdg_found == false) {
+                printf("[err] Could not find %s in %s\n", xdg_shell,
+                       protocols_dir);
+                return -1;
+            }
+            printf("[inf] Found xdg_shell spec: %s\n", xdg_shell_xml);
+
+            const char* cmd1[] = {"wayland-scanner", "--version", NULL};
+            int32_t     ret = process_exec(cmd1);
+            if (ret != 0) {
+                printf(
+                    "[err] Could not find wayland-scanner in PATH! "
+                    "Quitting...\n");
+                return -1;
+            }
+
+            printf("[inf] Running wayland-scanner...\n");
+            const char* cmd2[] = {"wayland-scanner", "client-header",
+                                  xdg_shell_xml, "./external/xdg-shell.h",
+                                  NULL};
+            const char* cmd3[] = {"wayland-scanner", "private-code",
+                                  xdg_shell_xml, "./external/xdg-shell.c",
+                                  NULL};
+
+            ret = process_exec(cmd2);
+            if (ret != 0) {
+                printf(
+                    "[err] Failed to execute wayland-scanner! Quitting...\n");
+                return -1;
+            }
+
+            ret = process_exec(cmd3);
+            if (ret != 0) {
+                printf(
+                    "[err] Failed to execute wayland-scanner! Quitting...\n");
+                return -1;
+            }
+        }
+        const char* vk_sdk_path = getenv("VULKAN_SDK");
+        if (vk_sdk_path == NULL) {
+            printf(
+                "[err] Failed to find $VULKAN_SDK path!\nMake sure the Vulkan "
+                "SDK "
+                "is installed and added to PATH.\nQuitting...\n");
             return -1;
         }
+        const char vk_sdk_include[PATH_MAX] = {0};
+        const char vk_sdk_lib[PATH_MAX] = {0};
+        snprintf((char*)vk_sdk_include, PATH_MAX, "-I%s/Include/", vk_sdk_path);
+        snprintf((char*)vk_sdk_lib, PATH_MAX, "-L%s/Lib/", vk_sdk_path);
     }
     return 0;
 }
 
 int32_t game_build() {
     // todo make platform independent
-    const char* vk_sdk_path = getenv("VULKAN_SDK");
-    if (vk_sdk_path == NULL) {
+    const char* vulkan_sdk = getenv("VULKAN_SDK");
+    if (vulkan_sdk == NULL) {
         printf(
             "[err] Failed to find $VULKAN_SDK path!\nMake sure the Vulkan SDK "
             "is installed and added to PATH.\nQuitting...\n");
@@ -214,14 +303,13 @@ int32_t game_build() {
     }
     const char vk_sdk_include[PATH_MAX] = {0};
     const char vk_sdk_lib[PATH_MAX] = {0};
-    snprintf((char*)vk_sdk_include, PATH_MAX, "-I%s/Include/", vk_sdk_path);
-    snprintf((char*)vk_sdk_lib, PATH_MAX, "-L%s/Lib/", vk_sdk_path);
+    snprintf((char*)vk_sdk_include, PATH_MAX, "-I%s/Include/", vulkan_sdk);
+    snprintf((char*)vk_sdk_lib, PATH_MAX, "-L%s/Lib/", vulkan_sdk);
 
     const char* compile[] = {
-        "gcc",         "./src/main.c", "-o",
-        "./bin/game0", "-I./external", vk_sdk_include,
-        vk_sdk_lib,    "-lvulkan",     "-lwayland-client",
-        NULL,
+        "gcc",      "./src/main.c",     "-o",           "./bin/game0",
+        "-g",       "-I./external",     vk_sdk_include, vk_sdk_lib,
+        "-lvulkan", "-lwayland-client", NULL,
     };
 
     return process_exec(compile);
