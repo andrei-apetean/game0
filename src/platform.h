@@ -1,24 +1,20 @@
 #pragma once
 
-#include "common.h"
+#include <stddef.h>
 
-typedef enum window_api {
-    window_api_wayland = 0,
-    window_api_xcb,
-    window_api_win32,
-    window_api_count,
-} window_api;
+#include "stdbool.h"
 
-typedef struct win_data_t {
-    void*      handle;
-    void*      connection;
-    window_api api;
-} win_data_t;
+typedef struct platform_state platform_state;
+typedef struct win_surface   win_surface;
 
-bool  platform_startup();
-bool  platform_open_window();
-bool  platform_shutdown();
-bool  platform_update(bool commit_surface);
-bool  platform_is_running();
-void  platform_get_width_height(uint32_t* width, uint32_t* height);
-win_data_t platform_get_window_data();
+typedef struct platform_interface {
+    bool (*startup)(platform_state*);
+    bool (*shutdown)(platform_state*);
+    bool (*update)(platform_state*);
+    bool (*is_running)(platform_state*);
+    bool (*poll_events)(platform_state*);
+    bool (*get_window_surface)(platform_state*, win_surface*);
+    size_t platform_state_size;
+} platform_interface;
+
+bool get_platform_interface(platform_interface*);

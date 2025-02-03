@@ -1,39 +1,48 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "platform.h"
-#include "render.h"
+// #include "render.h"
+
+platform_state* p_state = NULL;
+platform_interface platform;
 
 int main() {
-    if (platform_startup() != true) {
-        printf("Error executing platform_startup!\n");
-        return -1;
-    }
-    if (platform_open_window() != true) {
-        printf("Error executing platform_open_window!\n");
-        return -1;
-    }
-    win_data_t win = platform_get_window_data();
+    bool ret = false;
 
-    if (render_startup(win) != true) {
-        printf("Error executing platform_render_startup!\n");
+    ret = get_platform_interface(&platform);
+    if (ret == false) {
+        printf("Failed to get platform interface!\n");
         return -1;
     }
-    uint32_t iterations = 0;
-    while (platform_is_running()) {
-        render_paket_t paket = {0};
-        platform_get_width_height(&paket.width, &paket.height);
-        bool result = render_update(&paket);
-        if (!result) {
+
+    p_state = malloc(platform.platform_state_size);
+    if (p_state == NULL) {
+        printf("Failed to allocate platform state!\n");
+        return -1;
+    }
+
+    ret = platform.startup(p_state);
+
+    if (ret == false) {
+        printf("Failed to startup platform!\n");
+        return -1;
+    }
+    while (platform.is_running(p_state)) {
+        ret = platform.poll_events(p_state);
+        if (ret == false) {
             break;
         }
-        platform_update(paket.commit_surface);
-        iterations++;
-    }
-    render_shutdown();
-    platform_shutdown();
 
+        platform.update(p_state);
+    }
+    platform.shutdown(p_state);
+
+    free(p_state);
     return 0;
 }
 
-#include "platform_wayland.c"
-#include "render_vulkan.c"
-#include "vulkan_platform_wl.c"
+#include "platform.c"
+// #include "render_vulkan.c"
+// #include "vulkan_platform_wl.c"
