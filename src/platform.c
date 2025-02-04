@@ -6,8 +6,23 @@
 
 #include "common.h"
 
+typedef struct internal_state internal_state;
+
+typedef struct platform_state {
+    bool (*startup)(internal_state*);
+    bool (*shutdown)(internal_state*);
+    bool (*update)(internal_state*);
+    bool (*is_running)(internal_state*);
+    bool (*poll_events)(internal_state*);
+    bool (*get_window_surface)(internal_state*, win_surface*);
+    internal_state* internal_state;
+} platform_state;
+
 #ifdef OS_LINUX
 
+//
+//  Wayland Implementation /////////////////////////////////////////////////////////
+//
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>  //libwayland-protocols
@@ -27,7 +42,7 @@ typedef struct win_surface {
     struct wl_display* display;
 } win_surface;
 
-typedef struct platform_state_wl {
+typedef struct internal_state_wl {
     struct wl_registry*   registry;
     struct wl_compositor* compositor;
     struct xdg_wm_base*   shell;
@@ -39,7 +54,7 @@ typedef struct platform_state_wl {
     struct wl_shm*      shm;
     struct wl_shm_pool* pool;
     struct wl_buffer*   buffer;
-} platform_state_wl;
+} internal_state_wl;
 
 int create_shm_file(size_t size) {
     int fd = shm_open("/shm-buffer", O_RDWR | O_CREAT, 0600);
@@ -50,7 +65,7 @@ int create_shm_file(size_t size) {
     }
     return fd;
 }
-void create_shm_buffer(platform_state_wl* state) {
+void create_shm_buffer(internal_state_wl* state) {
     int stride = WIDTH * 4;
     int size = stride * HEIGHT;
 
@@ -100,7 +115,7 @@ static struct xdg_wm_base_listener shell_listener = {
 static void handle_registry(void* data, struct wl_registry* registry,
                             uint32_t name, const char* interface,
                             uint32_t version) {
-    platform_state_wl* state = data;
+    internal_state_wl* state = data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         state->compositor = wl_registry_bind(state->registry, name,
                                              &wl_compositor_interface, 1);
@@ -128,7 +143,7 @@ static void handle_toplevel_configure(void* data, struct xdg_toplevel* toplevel,
 
 static void handle_toplevel_close(void* data, struct xdg_toplevel* toplevel) {
     printf("Close requested!\n");
-    platform_state_wl* state = data;
+    internal_state_wl* state = data;
     if (state != NULL) {
         state->is_running = false;
     }
@@ -139,8 +154,8 @@ static const struct xdg_toplevel_listener toplevel_listener = {
     .close = handle_toplevel_close,
 };
 
-bool platform_startup_wl(platform_state* state) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_startup_wl(internal_state* state) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     if (state_wl == NULL) {
         printf("Platform state is invaid!\n");
         return NULL;
@@ -198,8 +213,8 @@ bool platform_startup_wl(platform_state* state) {
     return state_wl;
 }
 
-bool platform_shutdown_wl(platform_state* state) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_shutdown_wl(internal_state* state) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     if (state_wl == NULL) {
         printf("Cannot shutdown platform - state is invalid!\n");
         return false;
@@ -217,8 +232,8 @@ bool platform_shutdown_wl(platform_state* state) {
     return true;
 }
 
-bool platform_poll_events_wl(platform_state* state) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_poll_events_wl(internal_state* state) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     if (state_wl == NULL || state_wl->win.display == NULL) {
         printf("Cannot poll platform events - platform state is invalid!\n");
         return false;
@@ -230,8 +245,8 @@ bool platform_poll_events_wl(platform_state* state) {
     return true;
 }
 
-bool platform_get_window_surface_wl(platform_state* state, win_surface* win) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_get_window_surface_wl(internal_state* state, win_surface* win) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     if (state_wl == NULL) {
         printf("Cannot retrieve window surface - state is invalid!\n");
         return false;
@@ -240,8 +255,8 @@ bool platform_get_window_surface_wl(platform_state* state, win_surface* win) {
     return true;
 }
 
-bool platform_update_wl(platform_state* state) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_update_wl(internal_state* state) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     if (state_wl == NULL) {
         printf("Cannot run platform update - state is invalid!\n");
         return NULL;
@@ -254,27 +269,79 @@ bool platform_update_wl(platform_state* state) {
     return true;
 }
 
-bool platform_is_running_wl(platform_state* state) {
-    platform_state_wl* state_wl = (platform_state_wl*)state;
+bool platform_is_running_wl(internal_state* state) {
+    internal_state_wl* state_wl = (internal_state_wl*)state;
     return state_wl != NULL && state_wl->is_running;
 }
 #endif  // OS_LINUX
 
-bool get_platform_interface(platform_interface* interface) {
-    if (interface == NULL) {
-        return false;
-    }
-    *interface = (platform_interface){0};
+size_t platform_get_size() {
+    size_t interface_size = sizeof(platform_state);
+
 #ifdef OS_LINUX
-    interface->startup = platform_startup_wl;
-    interface->shutdown = platform_shutdown_wl;
-    interface->update = platform_update_wl;
-    interface->platform_state_size = sizeof(platform_state_wl);
-    interface->poll_events = platform_poll_events_wl;
-    interface->is_running = platform_is_running_wl;
-    interface->get_window_surface = platform_get_window_surface_wl;
-    return true;
+    return interface_size + sizeof(internal_state_wl);
 #else
+    return 0;
+#endif  // OS_LINUX
+}
+
+bool platform_startup(platform_state* state) {
+    if (state == NULL) {
+        printf("Cannot startup platform - state is invalid!\n");
+    }
+#ifdef OS_LINUX
+    state->startup = platform_startup_wl;
+    state->shutdown = platform_shutdown_wl;
+    state->update = platform_update_wl;
+    state->poll_events = platform_poll_events_wl;
+    state->is_running = platform_is_running_wl;
+    state->get_window_surface = platform_get_window_surface_wl;
+    state->internal_state = (internal_state*)(state + sizeof(platform_state));
+
+    return state->startup(state->internal_state);
+#else
+    printf("Cannot startup platform - only wayland backend is implemented!\n");
     return false;
 #endif  // OS_LINUX
+}
+
+
+
+//
+//  PLatform Interface /////////////////////////////////////////////////////////
+//
+
+bool platform_shutdown(platform_state* state) {
+    if (state == NULL) {
+        return false;
+    }
+    return state->shutdown(state->internal_state);
+}
+
+bool platform_update(platform_state* state) {
+    if (state == NULL) {
+        return false;
+    }
+    return state->update(state->internal_state);
+}
+
+bool platform_is_running(platform_state* state) {
+    if (state == NULL) {
+        return false;
+    }
+    return state->is_running(state->internal_state);
+}
+
+bool platform_poll_events(platform_state* state) {
+    if (state == NULL) {
+        return false;
+    }
+    return state->poll_events(state->internal_state);
+}
+
+bool platform_get_window_surface(platform_state* state, win_surface* surface) {
+    if (state == NULL) {
+        return false;
+    }
+    return state->get_window_surface(state->internal_state, surface);
 }

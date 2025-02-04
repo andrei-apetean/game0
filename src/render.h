@@ -1,14 +1,12 @@
 #pragma once
 
-#include "common.h"
-#include "platform.h"
+#include <stddef.h>
 
-typedef struct render_paket_t {
-    uint32_t width;
-    uint32_t height;
-    bool commit_surface;
-} render_paket_t;
+#include "stdbool.h"
 
-bool render_startup(win_data_t window);
-bool render_update(render_paket_t* paket);
-bool render_shutdown();
+typedef struct render_state render_state;
+
+size_t render_get_size();
+bool   render_startup(render_state* state);
+bool   render_shutdown(render_state* state);
+
