@@ -1,62 +1,40 @@
+#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
+#include <wayland-client-core.h>
 
-#include "platform.h"
-#include "render.h"
+#include "game0.h"
+#include "private/base.h"
 
-platform_state* p_state = NULL;
-render_state*   r_state = NULL;
+typedef struct wl_display* (*pfn_wl_display_connect)(const char*);
 
 int main() {
-    {
-        size_t platform_state_size = platform_get_size();
-        if (platform_state_size == 0) {
-            printf("platform_size requirement is invalide!\n");
-            return -1;
-        }
-        p_state = malloc(platform_state_size);
-        if (p_state == NULL) {
-            printf("Failed to allocate platform_state!\n");
-            return -1;
-        }
+    printf("Hello world!\n");
+    struct config cfg = {
+        .window_height = 900,
+        .window_width = 1080,
+        .window_title = "game0",
+    };
+    if (startup(cfg) != 0) return -1;
+
+    while (is_running()) {
+        poll_events();
+
+        render_begin();
+        render_end();
     }
 
-    if (platform_startup(p_state) == false) {
-        printf("Failed to startup platform!\n");
-        return -1;
-    }
-    {
-        size_t render_state_size = render_get_size();
-        if (render_state_size == 0) {
-            printf("platform_size requirement is invalide!\n");
-            return -1;
-        }
-        r_state = malloc(render_state_size);
-        if (r_state == NULL) {
-            printf("Failed to allocate platform_state!\n");
-            return -1;
-        }
-    }
-
-    if (render_startup(r_state) == false) {
-        printf("Failed to startup render!\n");
-        return -1;
-    }
-    // while (platform_is_running(p_state)) {
-    //     ret = platform_poll_events(p_state);
-    //     if (ret == false) {
-    //         break;
-    //     }
-
-    //     platform_update(p_state);
-    // }
-    render_shutdown(r_state);
-    platform_shutdown(p_state);
-
-    free(p_state);
+    teardown();
+    printf("Goodbye!\n");
     return 0;
 }
 
-#include "platform.c"
-#include "render.c"
+#include "core_state.c"
+#include "render/rndr_vulkan.c"
+#ifdef OS_LINUX
+#include "os/win_wayland.c"
+#include "render/vulkan_surface_wayland.c"
+#include "system_posix.c"
+#else
+#error "Unsupported backend!"
+#endif  // OS_LINUX
