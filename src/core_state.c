@@ -1,24 +1,25 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "game0.h"
 #include "private/base.h"
 #include "private/input.h"
-#include "private/rndr_bknd.h"
-#include "private/win_bknd.h"
+#include "private/render_backend.h"
+#include "private/window_backend.h"
 
-struct core_state {
-    win_bknd*    win_bknd;
-    rndr_bknd*   rndr_bknd;
-    struct input input;
-    int32_t      is_running;
-};
+typedef struct {
+    window_backend* window_backend;
+    render_backend* render_backend;
+    input_state     input;
+    int32_t         is_running;
+} core_state;
 
-static struct core_state core = {0};
+static core_state core = {0};
 
 void process_input();
 
-void on_event(struct input_ev e) {
+void on_event(input_ev e) {
     switch (e.type) {
         case INPUT_EVENT_KEY: {
             if (e.key.code > 0 && e.key.code < KB_MAX_KEYS) {
@@ -38,7 +39,10 @@ void on_event(struct input_ev e) {
             break;
         }
         case INPUT_EVENT_SIZE: {
-            // don't care for now
+            if (core.is_running && core.render_backend) {
+                vec2 size = get_window_size();
+                render_backend_resize(core.render_backend, size);
+            }
             break;
         }
         case INPUT_EVENT_QUIT: {
@@ -51,39 +55,39 @@ void on_event(struct input_ev e) {
     }
 }
 
-int32_t startup(struct config cfg) {
-    size_t wndbknd_size = win_bknd_get_size();
-    size_t rndrbknd_size = rndr_bknd_get_size();
-    core.win_bknd = malloc(wndbknd_size);
-    core.rndr_bknd = malloc(rndrbknd_size);
-    if (!core.win_bknd) return -1;
-    if (!core.rndr_bknd) return -1;
+int32_t startup(win_config cfg) {
+    size_t window_backend_size = window_backend_get_size();
+    size_t rndrbknd_size = render_backend_get_size();
+    core.window_backend = malloc(window_backend_size);
+    core.render_backend = malloc(rndrbknd_size);
+    if (!core.window_backend) return -1;
+    if (!core.render_backend) return -1;
 
-    const struct window_cfg wcfg = {
+    const window_cfg wcfg = {
         .width = cfg.window_width,
         .height = cfg.window_height,
         .title = cfg.window_title,
     };
-    if (win_bknd_startup(&core.win_bknd, wcfg) != 0) return -1;
-    win_bknd_attach_handler(core.win_bknd, on_event);
+    if (window_backend_startup(&core.window_backend, wcfg) != 0) return -1;
+    window_backend_attach_handler(core.window_backend, on_event);
 
-    struct window_info    winfo = win_bknd_get_info(core.win_bknd);
-    const struct rndr_cfg rcfg = {
+    const window_info    winfo = window_backend_get_info(core.window_backend);
+    const render_cfg rcfg = {
         .height = cfg.window_height,
         .width = cfg.window_width,
         .win_api = winfo.win_api,
         .win_handle = winfo.win_handle,
         .win_inst = winfo.win_instance,
     };
-    if (rndr_bknd_startup(&core.rndr_bknd, rcfg)) return -1;
+    if (render_backend_startup(&core.render_backend, rcfg)) return -1;
 
     core.is_running = 1;
     return 0;
 }
 
 int32_t teardown() {
-    if (core.rndr_bknd) rndr_bknd_teardown(core.rndr_bknd);
-    if (core.win_bknd) win_bknd_teardown(core.win_bknd);
+    if (core.render_backend) render_backend_teardown(core.render_backend);
+    if (core.window_backend) window_backend_teardown(core.window_backend);
     return 0;
 }
 
@@ -93,16 +97,14 @@ void stop_running() { core.is_running = 0; }
 
 void poll_events() {
     process_input();
-    win_bknd_poll_events(core.win_bknd);
+    window_backend_poll_events(core.window_backend);
 }
 
-void render_begin() {
-    rndr_bknd_render_begin(core.rndr_bknd);
-}
+vec2 get_window_size() { return window_backend_window_size(core.window_backend);}
 
-void render_end() {
-    rndr_bknd_render_end(core.rndr_bknd);
-}
+void render_begin() { render_backend_render_begin(core.render_backend); }
+void draw_mesh(mesh* m) { render_backend_draw_mesh(core.render_backend, m); }
+void render_end() { render_backend_render_end(core.render_backend); }
 
 int32_t is_key_down(int32_t key) {
     return (key > 0 && key < KB_MAX_KEYS)
@@ -139,6 +141,12 @@ int32_t is_button_released(int32_t button) {
                ? core.input.keys[button] == KEY_STATE_RELEASED
                : 0;
 }
+vec2 get_mouse_delta() {
+    return (vec2) {
+        core.input.pointer_x - core.input.last_pointer_x,
+            core.input.pointer_y - core.input.last_pointer_y,
+    };
+}
 
 void process_input() {
     uint32_t* keys = core.input.keys;
@@ -152,4 +160,134 @@ void process_input() {
     }
     core.input.last_pointer_x = core.input.pointer_x;
     core.input.last_pointer_y = core.input.pointer_y;
+}
+
+
+vec2 v2_add(vec2 a, vec2 b) { return (vec2){a.x + b.x, a.y + b.y}; }
+vec2 v2_sub(vec2 a, vec2 b) { return (vec2){a.x - b.x, a.y - b.y}; }
+vec2 v2_mul(vec2 a, vec2 b) { return (vec2){a.x * b.x, a.y * b.y}; }
+vec2 v2_scale(vec2 v, float s) { return (vec2){v.x * s, v.y * s}; }
+vec2 v2_div(vec2 v, float s) { return (vec2){v.x / s, v.y / s}; }
+float v2_dot(vec2 a, vec2 b) { return a.x * b.x + a.y * b.y; }
+float v2_length(vec2 v) { return sqrtf(v2_dot(v, v)); }
+vec2 v2_normalize(vec2 v) {
+    float len = v2_length(v);
+    return (len != 0.0f) ? v2_div(v, len) : (vec2){0.0f, 0.0f};
+}
+vec2 v2_lerp(vec2 a, vec2 b, float t) { return (vec2){a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t}; }
+
+vec3 v3_zero() { return (vec3){0.0f, 0.0f, 0.0f}; }
+vec3 v3_one() { return (vec3){1.0f, 1.0f, 1.0f}; }
+vec3 v3_left() { return (vec3){-1.0f, 0.0f, 0.0f}; }
+vec3 v3_right() { return (vec3){1.0f, 0.0f, 0.0f}; }
+vec3  v3_up() { return (vec3){0.0f, 1.0f, 0.0f}; }
+vec3  v3_add(vec3 a, vec3 b) { return (vec3){a.x + b.x, a.y + b.y, a.z + b.z}; }
+vec3 v3_sub(vec3 a, vec3 b) { return (vec3){a.x - b.x, a.y - b.y, a.z - b.z}; }
+vec3 v3_mul(vec3 a, vec3 b) { return (vec3){a.x * b.x, a.y * b.y, a.z * b.z}; }
+vec3 v3_scale(vec3 v, float s) { return (vec3){v.x * s, v.y * s, v.z * s}; }
+vec3 v3_div(vec3 v, float s) { return (vec3){v.x / s, v.y / s, v.z / s}; }
+float v3_dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+vec3 v3_cross(vec3 a, vec3 b) {
+    return (vec3){
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    };
+}
+float v3_length(vec3 v) { return sqrtf(v3_dot(v, v)); }
+vec3 v3_normalize(vec3 v) {
+    float len = v3_length(v);
+    return (len != 0.0f) ? v3_div(v, len) : (vec3){0.0f, 0.0f, 0.0f};
+}
+vec3 v3_lerp(vec3 a, vec3 b, float t) {
+    return (vec3){a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
+}
+
+// Vec4 implementations
+vec4 v4_add(vec4 a, vec4 b) { return (vec4){a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w}; }
+vec4 v4_sub(vec4 a, vec4 b) { return (vec4){a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w}; }
+vec4 v4_mul(vec4 a, vec4 b) { return (vec4){a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w}; }
+vec4 v4_scale(vec4 v, float s) { return (vec4){v.x * s, v.y * s, v.z * s, v.w * s}; }
+vec4 v4_div(vec4 v, float s) { return (vec4){v.x / s, v.y / s, v.z / s, v.w / s}; }
+float v4_dot(vec4 a, vec4 b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+float v4_length(vec4 v) { return sqrtf(v4_dot(v, v)); }
+vec4 v4_normalize(vec4 v) {
+    float len = v4_length(v);
+    return (len != 0.0f) ? v4_div(v, len) : (vec4){0.0f, 0.0f, 0.0f, 0.0f};
+}
+vec4 v4_lerp(vec4 a, vec4 b, float t) {
+    return (vec4){
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+        a.w + (b.w - a.w) * t
+    };
+}
+
+
+mat4 m4_identity(void) {
+    mat4 result = {0};
+    result.m[0] = result.m[5] = result.m[10] = result.m[15] = 1.0f;
+    return result;
+}
+
+mat4 m4_translation(vec3 translation) {
+    mat4 result = m4_identity();
+    result.m[12] = translation.x;
+    result.m[13] = translation.y;
+    result.m[14] = translation.z;
+    return result;
+}
+
+mat4 m4_rotation_x(float radians) {
+    float c = cosf(radians), s = sinf(radians);
+    mat4 result = m4_identity();
+    result.m[5] = c;
+    result.m[6] = s;
+    result.m[9] = -s;
+    result.m[10] = c;
+    return result;
+}
+
+mat4 m4_rotation_y(float radians) {
+    float c = cosf(radians), s = sinf(radians);
+    mat4 result = m4_identity();
+    result.m[0] = c;
+    result.m[2] = -s;
+    result.m[8] = s;
+    result.m[10] = c;
+    return result;
+}
+
+mat4 m4_rotation_z(float radians) {
+    float c = cosf(radians), s = sinf(radians);
+    mat4 result = m4_identity();
+    result.m[0] = c;
+    result.m[1] = s;
+    result.m[4] = -s;
+    result.m[5] = c;
+    return result;
+}
+
+mat4 m4_perspective(float fov_radians, float aspect, float near_z, float far_z) {
+    float f = 1.0f / tanf(fov_radians / 2.0f);
+    mat4 result = {0};
+    result.m[0] = f / aspect;
+    result.m[5] = f;
+    result.m[10] = (far_z + near_z) / (near_z - far_z);
+    result.m[11] = -1.0f;
+    result.m[14] = (2.0f * far_z * near_z) / (near_z - far_z);
+    return result;
+}
+
+mat4 m4_mul(mat4 a, mat4 b) {
+    mat4 result = {0};
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            for (int i = 0; i < 4; ++i) {
+                result.m[col * 4 + row] += a.m[i * 4 + row] * b.m[col * 4 + i];
+            }
+        }
+    }
+    return result;
 }
