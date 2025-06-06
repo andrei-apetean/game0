@@ -7,8 +7,11 @@
 #include <vulkan/vulkan_core.h>
 
 #include "private/base.h"
-#include "private/rndr_bknd.h"
-#include "render/vulkan_surface.h"
+#include "private/render_backend.h"
+#include "render/window_surface_vk.h"
+
+// todo
+#define CLAMP(x, min, max) (((x) < (min)) ? (min) : ((x) > (max)) ? (max) : (x))
 
 #define WL_SURFACE_EXT_NAME "VK_KHR_wayland_surface"
 #define TARGET_FRAME_BUFFERS 3
@@ -22,13 +25,21 @@ static VkBool32 debug_utils_callback(
            callback_data->messageIdNumber, callback_data->pMessage);
 
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        // __debugbreak();
+        // ASSERT(0); // todo
     }
 
     return VK_FALSE;
 }
 
-struct frame {
+typedef struct {
+    VkBuffer       vertex_buffer;
+    VkDeviceMemory vertex_memory;
+    VkBuffer       index_buffer;
+    VkDeviceMemory index_memory;
+    uint32_t       index_count;
+} gpu_mesh;
+
+typedef struct {
     VkImage         img;
     VkImageView     img_view;
     VkCommandBuffer cmd_buf;
@@ -37,9 +48,9 @@ struct frame {
     VkSemaphore     sem_render_finished;
     VkFence         inflight_fence;
     uint32_t        image_index;
-};
+} frame;
 
-struct vulkan_bknd {
+typedef struct {
     VkAllocationCallbacks* allocator;
     VkInstance             instance;
     VkSurfaceKHR           surface;
@@ -51,16 +62,18 @@ struct vulkan_bknd {
     VkSwapchainKHR         swapchain;
     VkCommandPool          pool;
     VkRenderPass           render_pass;
+    VkPipelineLayout       pipeline_layout;
+    VkPipeline             pipeline;
     uint32_t               current_frame;
     uint32_t               queue_family_idx;
     uint16_t               sc_width;
     uint16_t               sc_height;
 
-    struct frame frames[TARGET_FRAME_BUFFERS];
+    frame frames[TARGET_FRAME_BUFFERS];
 #ifdef _DEBUG
     VkDebugUtilsMessengerEXT dbg_msgr;
 #endif
-};
+} backend_vk;
 
 static const char* s_requested_layers[] = {
 #ifdef _DEBUG
@@ -72,19 +85,35 @@ static const char* s_requested_layers[] = {
 
 ////// -------------------------- forward declarations;
 //
-static void    check(VkResult result, const char* msg, const char* file,
-                     size_t line);
-static int32_t get_family_queue(struct vulkan_bknd* state,
-                                VkPhysicalDevice    dev);
-static void    create_swapchain(struct vulkan_bknd* state, VkExtent2D size);
-static void    destroy_swapchain(struct vulkan_bknd* state);
+static void check(VkResult res, const char* msg, const char* file, size_t line);
+static int32_t get_family_queue(backend_vk* state, VkPhysicalDevice dev);
+static void    create_swapchain(backend_vk* state, VkExtent2D size);
+static void    destroy_swapchain(backend_vk* state);
+static void    create_graphics_pipeline(backend_vk* state);
+static VkVertexInputBindingDescription get_binding_description();
+static void get_attribute_descriptions(VkVertexInputAttributeDescription* attr);
+
+static VkShaderModule load_shader_module(VkDevice device, const char* filename,
+                                         VkAllocationCallbacks* allocator);
+
+static int32_t create_buffer(backend_vk* state, VkDeviceSize size,
+                             VkBufferUsageFlags    usage,
+                             VkMemoryPropertyFlags properties, VkBuffer* buffer,
+                             VkDeviceMemory* buffer_memory);
+
+static uint32_t find_memory_type(backend_vk* state, uint32_t type_filter,
+                                 VkMemoryPropertyFlags properties);
+static void get_attribute_descriptions(VkVertexInputAttributeDescription* attr);
+static void upload_to_gpu(backend_vk* state, void* data, VkDeviceSize size,
+                          VkBuffer dst_buffer);
+static void gpu_mesh_create(backend_vk* state, mesh* src, gpu_mesh* out);
 
 ////// -------------------------- interface implementation;
 //
-uint32_t rndr_bknd_get_size() { return sizeof(struct vulkan_bknd); }
+uint32_t render_backend_get_size() { return sizeof(backend_vk); }
 
-int32_t rndr_bknd_startup(rndr_bknd** bknd, struct rndr_cfg cfg) {
-    struct vulkan_bknd* state = (struct vulkan_bknd*)*bknd;
+int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
+    backend_vk* state = (backend_vk*)*bknd;
     ASSERT(state);
     state->allocator = NULL;
     //----------- Instance
@@ -386,11 +415,15 @@ int32_t rndr_bknd_startup(rndr_bknd** bknd, struct rndr_cfg cfg) {
         create_swapchain(state, size);
     }
 
+    //----------- Graphics Pipeline
+    {
+        create_graphics_pipeline(state);
+    }
     return 0;
 }
 
-void rndr_bknd_render_begin(rndr_bknd* bknd) {
-    struct vulkan_bknd* state = (struct vulkan_bknd*)bknd;
+void render_backend_render_begin(render_backend* bknd) {
+    backend_vk* state = (backend_vk*)bknd;
     ASSERT(state);
 
     // Wait for previous frame to finish before starting this one
@@ -402,9 +435,10 @@ void rndr_bknd_render_begin(rndr_bknd* bknd) {
 
     // Acquire the next swapchain image
     uint32_t image_index;
-    VkResult result = vkAcquireNextImageKHR(state->device, state->swapchain, UINT64_MAX,
-                                            state->frames[state->current_frame].sem_render_start,
-                                            VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(
+        state->device, state->swapchain, UINT64_MAX,
+        state->frames[state->current_frame].sem_render_start, VK_NULL_HANDLE,
+        &image_index);
     if (result != VK_SUCCESS) {
         // handle swapchain recreation or errors here
         return;
@@ -423,17 +457,19 @@ void rndr_bknd_render_begin(rndr_bknd* bknd) {
     };
     vkBeginCommandBuffer(cmd, &begin_info);
 
-    VkClearValue clear_color = {.color = {{1.0f, 0.0f, 0.0f, 1.0f}}};
+    VkClearValue clear_color = {.color = {{0.0941f, 0.0941f, 0.0941f, 1.0f}}};
 
     VkRenderPassBeginInfo rp_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = state->render_pass,
         .framebuffer = state->frames[image_index].frame_buf,
-        .renderArea = {
-            .offset = {0, 0},
-            .extent = {state->sc_width, state->sc_height},
-        },
+        .renderArea =
+            {
+                .offset = {0, 0},
+                .extent = {state->sc_width, state->sc_height},
+            },
         .clearValueCount = 1,
+
         .pClearValues = &clear_color,
     };
 
@@ -442,8 +478,8 @@ void rndr_bknd_render_begin(rndr_bknd* bknd) {
     // Ready to record draw calls here...
 }
 
-void rndr_bknd_render_end(rndr_bknd* bknd) {
-    struct vulkan_bknd* state = (struct vulkan_bknd*)bknd;
+void render_backend_render_end(render_backend* bknd) {
+    backend_vk* state = (backend_vk*)bknd;
     ASSERT(state);
 
     uint32_t image_index = state->frames[state->current_frame].image_index;
@@ -453,9 +489,12 @@ void rndr_bknd_render_end(rndr_bknd* bknd) {
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
 
-    VkSemaphore waitSemaphores[] = {state->frames[state->current_frame].sem_render_start};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSemaphore signalSemaphores[] = {state->frames[state->current_frame].sem_render_finished};
+    VkSemaphore waitSemaphores[] = {
+        state->frames[state->current_frame].sem_render_start};
+    VkPipelineStageFlags waitStages[] = {
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore signalSemaphores[] = {
+        state->frames[state->current_frame].sem_render_finished};
 
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -485,11 +524,43 @@ void rndr_bknd_render_end(rndr_bknd* bknd) {
     state->current_frame = (state->current_frame + 1) % TARGET_FRAME_BUFFERS;
 }
 
-void rndr_bknd_teardown(rndr_bknd* bknd) {
-    struct vulkan_bknd* state = (struct vulkan_bknd*)bknd;
+void render_backend_draw_mesh(render_backend* bknd, mesh* m) {
+    backend_vk* state = (backend_vk*)bknd;
+    ASSERT(state);
+    VkCommandBuffer cmd = state->frames[state->current_frame].cmd_buf;
+
+    if (!m->uploaded) {
+        m->uploaded = malloc(sizeof(gpu_mesh));
+        gpu_mesh_create(state, m, m->uploaded);
+    }
+    gpu_mesh* mesh = m->uploaded;
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, &mesh->vertex_buffer, offsets);
+    vkCmdBindIndexBuffer(cmd, mesh->index_buffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state->pipeline);
+
+    vkCmdPushConstants(cmd, state->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+                       0, sizeof(mat4), &m->mvp);
+    vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
+}
+
+void     render_backend_resize(render_backend* bknd, vec2 dimensions) {
+    backend_vk* state = (backend_vk*)bknd;
     ASSERT(state);
     vkDeviceWaitIdle(state->device);
+    destroy_swapchain(state);
+    VkExtent2D size = (VkExtent2D){dimensions.x, dimensions.y};
+    create_swapchain(state, size);
+}
 
+void render_backend_teardown(render_backend* bknd) {
+    backend_vk* state = (backend_vk*)bknd;
+    ASSERT(state);
+    vkDeviceWaitIdle(state->device);
+    vkDestroyPipelineLayout(state->device, state->pipeline_layout,
+                            state->allocator);
+    vkDestroyPipeline(state->device, state->pipeline, state->allocator);
     vkDestroyRenderPass(state->device, state->render_pass, state->allocator);
     destroy_swapchain(state);
     vkDestroyCommandPool(state->device, state->pool, state->allocator);
@@ -516,8 +587,7 @@ static void check(VkResult result, const char* msg, const char* file,
     }
 }
 
-static int32_t get_family_queue(struct vulkan_bknd* state,
-                                VkPhysicalDevice    dev) {
+static int32_t get_family_queue(backend_vk* state, VkPhysicalDevice dev) {
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(dev, &family_count, NULL);
 
@@ -544,95 +614,97 @@ static int32_t get_family_queue(struct vulkan_bknd* state,
     return supported;
 }
 
-static void create_swapchain(struct vulkan_bknd* state, VkExtent2D size) {
+static void create_swapchain(backend_vk* state, VkExtent2D size) {
     VkSurfaceCapabilitiesKHR surf_caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(state->gpu, state->surface,
                                               &surf_caps);
 
     VkExtent2D sc_extent = surf_caps.currentExtent;
-
-    printf("Current extent: { %d, %d }\n", sc_extent.width, sc_extent.height);
-
-    if (surf_caps.currentExtent.width != UINT32_MAX) {
-        // The surface size is defined and must be used.
-        sc_extent = surf_caps.currentExtent;
-    } else {
-        // Clamp the window size to the allowed min/max extent.
+    if (sc_extent.width == UINT32_MAX) {
         sc_extent.width = size.width;
         sc_extent.height = size.height;
 
-        if (sc_extent.width < surf_caps.minImageExtent.width)
-            sc_extent.width = surf_caps.minImageExtent.width;
-        else if (sc_extent.width > surf_caps.maxImageExtent.width)
-            sc_extent.width = surf_caps.maxImageExtent.width;
-
-        if (sc_extent.height < surf_caps.minImageExtent.height)
-            sc_extent.height = surf_caps.minImageExtent.height;
-        else if (sc_extent.height > surf_caps.maxImageExtent.height)
-            sc_extent.height = surf_caps.maxImageExtent.height;
+        sc_extent.width = CLAMP(sc_extent.width, surf_caps.minImageExtent.width,
+                                surf_caps.maxImageExtent.width);
+        sc_extent.height =
+            CLAMP(sc_extent.height, surf_caps.minImageExtent.height,
+                  surf_caps.maxImageExtent.height);
     }
 
-    printf("Modified extent: { %d, %d }\n", sc_extent.width, sc_extent.height);
-    state->sc_height = sc_extent.height;
     state->sc_width = sc_extent.width;
-    VkSurfaceTransformFlagBitsKHR pre_transform;
+    state->sc_height = sc_extent.height;
 
-    if (surf_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
-        pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    } else {
-        pre_transform = surf_caps.currentTransform;
-    }
+    VkSurfaceTransformFlagBitsKHR pre_transform =
+        (surf_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+            ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+            : surf_caps.currentTransform;
+
+    uint32_t desired_img_count = TARGET_FRAME_BUFFERS;
+    if (desired_img_count < surf_caps.minImageCount)
+        desired_img_count = surf_caps.minImageCount;
+    else if (surf_caps.maxImageCount > 0 &&
+             desired_img_count > surf_caps.maxImageCount)
+        desired_img_count = surf_caps.maxImageCount;
 
     VkSwapchainCreateInfoKHR sc_ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = state->surface,
-        .minImageCount = TARGET_FRAME_BUFFERS,  // todo
+        .minImageCount = desired_img_count,
+        .imageFormat = state->surface_fmt.format,
+        .imageColorSpace = state->surface_fmt.colorSpace,
         .imageExtent = sc_extent,
-        .clipped = VK_TRUE,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                       VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = pre_transform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = state->present_mode,
-        .imageFormat = state->surface_fmt.format,
-        .imageColorSpace = state->surface_fmt.colorSpace,
-        .preTransform = pre_transform,
+        .clipped = VK_TRUE,
     };
 
-    VkResult result = vkCreateSwapchainKHR(state->device, &sc_ci,
-                                           state->allocator, &state->swapchain);
-    check(result, "vkCreateSwapchainKHR", __FILE__, __LINE__);
+    check(vkCreateSwapchainKHR(state->device, &sc_ci, state->allocator,
+                               &state->swapchain),
+          "vkCreateSwapchainKHR", __FILE__, __LINE__);
 
-    uint32_t img_count = TARGET_FRAME_BUFFERS;
-    VkImage  images[TARGET_FRAME_BUFFERS];
+    uint32_t img_count = 0;
+    vkGetSwapchainImagesKHR(state->device, state->swapchain, &img_count, NULL);
+
+    VkImage* images = malloc(img_count * sizeof(VkImage));
+    check(images != NULL ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY,
+          "malloc swapchain images", __FILE__, __LINE__);
+
     vkGetSwapchainImagesKHR(state->device, state->swapchain, &img_count,
                             images);
+    ASSERT(img_count <= TARGET_FRAME_BUFFERS);
 
-    vkGetSwapchainImagesKHR(state->device, state->swapchain, &img_count,
-                            images);
-    for (uint32_t i = 0; i < TARGET_FRAME_BUFFERS; ++i) {
+    for (uint32_t i = 0; i < img_count; ++i) {
         state->frames[i].img = images[i];
 
+        // Create image view
         VkImageViewCreateInfo view_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = state->frames[i].img,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = state->surface_fmt.format,
-            .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .components.a = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .subresourceRange.baseMipLevel = 0,
-            .subresourceRange.levelCount = 1,
-            .subresourceRange.baseArrayLayer = 0,
-            .subresourceRange.layerCount = 1,
+            .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                           VK_COMPONENT_SWIZZLE_IDENTITY,
+                           VK_COMPONENT_SWIZZLE_IDENTITY,
+                           VK_COMPONENT_SWIZZLE_IDENTITY},
+            .subresourceRange =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
         };
-        vkCreateImageView(state->device, &view_info, state->allocator,
-                          &state->frames[i].img_view);
+        check(vkCreateImageView(state->device, &view_info, state->allocator,
+                                &state->frames[i].img_view),
+              "vkCreateImageView", __FILE__, __LINE__);
 
-        // Framebuffer
+        // Create framebuffer
         VkFramebufferCreateInfo fb_ci = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = state->render_pass,
@@ -642,38 +714,43 @@ static void create_swapchain(struct vulkan_bknd* state, VkExtent2D size) {
             .height = state->sc_height,
             .layers = 1,
         };
-        vkCreateFramebuffer(state->device, &fb_ci, state->allocator,
-                            &state->frames[i].frame_buf);
+        check(vkCreateFramebuffer(state->device, &fb_ci, state->allocator,
+                                  &state->frames[i].frame_buf),
+              "vkCreateFramebuffer", __FILE__, __LINE__);
 
-        // Command Buffer
+        // Allocate command buffer
         VkCommandBufferAllocateInfo alloc_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = state->pool,
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
-        vkAllocateCommandBuffers(state->device, &alloc_info,
-                                 &state->frames[i].cmd_buf);
+        check(vkAllocateCommandBuffers(state->device, &alloc_info,
+                                       &state->frames[i].cmd_buf),
+              "vkAllocateCommandBuffers", __FILE__, __LINE__);
 
+        // Semaphores and fence
         VkSemaphoreCreateInfo sem_info = {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        };
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VkFenceCreateInfo fence_info = {
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT,  // Start signaled so first
-                                                    // wait doesn't stall
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
         };
-
-        vkCreateSemaphore(state->device, &sem_info, state->allocator,
-                          &state->frames[i].sem_render_start);
-        vkCreateSemaphore(state->device, &sem_info, state->allocator,
-                          &state->frames[i].sem_render_finished);
-        vkCreateFence(state->device, &fence_info, state->allocator,
-                      &state->frames[i].inflight_fence);
+        check(vkCreateSemaphore(state->device, &sem_info, state->allocator,
+                                &state->frames[i].sem_render_start),
+              "vkCreateSemaphore (start)", __FILE__, __LINE__);
+        check(vkCreateSemaphore(state->device, &sem_info, state->allocator,
+                                &state->frames[i].sem_render_finished),
+              "vkCreateSemaphore (finished)", __FILE__, __LINE__);
+        check(vkCreateFence(state->device, &fence_info, state->allocator,
+                            &state->frames[i].inflight_fence),
+              "vkCreateFence", __FILE__, __LINE__);
     }
+
+    free(images);
 }
 
-static void destroy_swapchain(struct vulkan_bknd* state) {
+static void destroy_swapchain(backend_vk* state) {
     for (size_t i = 0; i < TARGET_FRAME_BUFFERS; i++) {
         vkDestroySemaphore(state->device, state->frames[i].sem_render_finished,
                            state->allocator);
@@ -689,4 +766,319 @@ static void destroy_swapchain(struct vulkan_bknd* state) {
                              state->allocator);
     }
     vkDestroySwapchainKHR(state->device, state->swapchain, state->allocator);
+}
+
+VkShaderModule load_shader_module(VkDevice device, const char* filename,
+                                  VkAllocationCallbacks* allocator) {
+    FILE* f = fopen(filename, "rb");
+    ASSERT(f);
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    uint32_t* code = malloc(size);
+    fread(code, 1, size, f);
+    fclose(f);
+
+    VkShaderModuleCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = size,
+        .pCode = code,
+    };
+
+    VkShaderModule module;
+    VkResult       res = vkCreateShaderModule(device, &ci, allocator, &module);
+    check(res, "vkCreateShaderModule", __FILE__, __LINE__);
+    free(code);
+    return module;
+}
+
+void create_graphics_pipeline(backend_vk* state) {
+    VkDevice device = state->device;
+
+    // Load shader modules
+    VkShaderModule vert = load_shader_module(
+        device, "./bin/assets/shaders/shader.vert.spv", state->allocator);
+    VkShaderModule frag = load_shader_module(
+        device, "./bin/assets/shaders/shader.frag.spv", state->allocator);
+
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vert,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = frag,
+            .pName = "main",
+        }};
+
+    // Vertex input
+    VkVertexInputBindingDescription   binding = get_binding_description();
+    VkVertexInputAttributeDescription attr[2];
+    get_attribute_descriptions(attr);
+
+    VkPipelineVertexInputStateCreateInfo vertex_input = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding,
+        .vertexAttributeDescriptionCount = 2,
+        .pVertexAttributeDescriptions = attr,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE,
+    };
+
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (float)state->sc_width,
+        .height = (float)state->sc_height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent = {state->sc_width, state->sc_height},
+    };
+
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .depthClampEnable = VK_FALSE,
+        .rasterizerDiscardEnable = VK_FALSE,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        .blendEnable = VK_FALSE,
+    };
+
+    VkPipelineColorBlendStateCreateInfo color_blending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+    };
+
+    VkPushConstantRange push_constant_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(mat4),
+    };
+
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_constant_range,
+        .setLayoutCount = 0,
+        .pSetLayouts = NULL,
+    };
+
+    VkResult res =
+        vkCreatePipelineLayout(device, &pipeline_layout_info, state->allocator,
+                               &state->pipeline_layout);
+    check(res, "vkCreatePipelineLayout", __FILE__, __LINE__);
+
+    VkGraphicsPipelineCreateInfo pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2,
+        .pStages = stages,
+        .pVertexInputState = &vertex_input,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blending,
+        .layout = state->pipeline_layout,
+        .renderPass = state->render_pass,
+        .subpass = 0,
+    };
+
+    res = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_info,
+                                    state->allocator, &state->pipeline);
+    check(res, "vkCreateGraphicsPipelines", __FILE__, __LINE__);
+
+    vkDestroyShaderModule(device, vert, state->allocator);
+    vkDestroyShaderModule(device, frag, state->allocator);
+}
+
+static void gpu_mesh_create(backend_vk* state, mesh* src, gpu_mesh* out) {
+    VkDeviceSize vbuf_size = sizeof(vertex) * src->vertex_count;
+    VkDeviceSize ibuf_size = sizeof(uint16_t) * src->index_count;
+
+    // Create vertex buffer
+    create_buffer(
+        state, vbuf_size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &out->vertex_buffer,
+        &out->vertex_memory);
+
+    // Create index buffer
+    create_buffer(
+        state, ibuf_size,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &out->index_buffer,
+        &out->index_memory);
+
+    // Upload data to staging buffer and copy to GPU
+    upload_to_gpu(state, src->vertices, vbuf_size, out->vertex_buffer);
+    upload_to_gpu(state, src->indices, ibuf_size, out->index_buffer);
+
+    out->index_count = src->index_count;
+}
+static VkVertexInputBindingDescription get_binding_description() {
+    return (VkVertexInputBindingDescription){
+        .binding = 0,
+        .stride = sizeof(vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+}
+
+static void get_attribute_descriptions(
+    VkVertexInputAttributeDescription* attr) {
+    attr[0] = (VkVertexInputAttributeDescription){
+        .binding = 0,
+        .location = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(vertex, pos),
+    };
+    attr[1] = (VkVertexInputAttributeDescription){
+        .binding = 0,
+        .location = 1,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(vertex, col),
+    };
+}
+
+uint32_t find_memory_type(backend_vk* state, uint32_t type_filter,
+                          VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties mem_properties;
+    vkGetPhysicalDeviceMemoryProperties(state->gpu, &mem_properties);
+
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+        if ((type_filter & (1 << i)) &&
+            (mem_properties.memoryTypes[i].propertyFlags & properties) ==
+                properties) {
+            return i;
+        }
+    }
+
+    ASSERT(0 && "Failed to find suitable memory type");
+    return 0;
+}
+
+static int32_t create_buffer(backend_vk* state, VkDeviceSize size,
+                             VkBufferUsageFlags    usage,
+                             VkMemoryPropertyFlags properties, VkBuffer* buffer,
+                             VkDeviceMemory* buffer_memory) {
+    VkBufferCreateInfo buffer_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VkResult result =
+        vkCreateBuffer(state->device, &buffer_info, state->allocator, buffer);
+    if (result != VK_SUCCESS) return -1;
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(state->device, *buffer, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_reqs.size,
+        .memoryTypeIndex =
+            find_memory_type(state, mem_reqs.memoryTypeBits, properties),
+    };
+
+    result = vkAllocateMemory(state->device, &alloc_info, state->allocator,
+                              buffer_memory);
+    if (result != VK_SUCCESS) return -1;
+
+    vkBindBufferMemory(state->device, *buffer, *buffer_memory, 0);
+
+    return 0;
+}
+
+static void upload_to_gpu(backend_vk* state, void* data, VkDeviceSize size,
+                          VkBuffer dst_buffer) {
+    VkBuffer       staging_buffer;
+    VkDeviceMemory staging_memory;
+
+    // Create staging buffer
+    create_buffer(state, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  &staging_buffer, &staging_memory);
+
+    // Map and copy data
+    void* mapped;
+    vkMapMemory(state->device, staging_memory, 0, size, 0, &mapped);
+    memcpy(mapped, data, (size_t)size);
+    vkUnmapMemory(state->device, staging_memory);
+
+    // Begin a one-time command buffer
+    VkCommandBufferAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = state->pool,
+        .commandBufferCount = 1,
+    };
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(state->device, &alloc_info, &cmd);
+
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    vkBeginCommandBuffer(cmd, &begin_info);
+
+    // Copy buffer command
+    VkBufferCopy copy_region = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = size,
+    };
+    vkCmdCopyBuffer(cmd, staging_buffer, dst_buffer, 1, &copy_region);
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait for completion
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+    };
+    vkQueueSubmit(state->queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(state->queue);  // You can improve perf later with a
+                                    // dedicated transfer queue
+
+    // Cleanup staging buffer
+    vkFreeCommandBuffers(state->device, state->pool, 1, &cmd);
+    vkDestroyBuffer(state->device, staging_buffer, state->allocator);
+    vkFreeMemory(state->device, staging_memory, state->allocator);
 }

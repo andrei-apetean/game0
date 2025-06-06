@@ -83,7 +83,7 @@ int game_prebuild() {
     }
     struct dirent* e;
     while ((e = readdir(d))) {
-        if (e->d_type == DT_REG && strstr(e->d_name, ".glsl")) {
+        if (strstr(e->d_name, ".vert") || strstr(e->d_name, ".frag")) {
             char in[MAX_PATH], out[PATH_MAX];
             snprintf(in, MAX_PATH, "%s/%s", SHADERS_DIR, e->d_name);
             snprintf(out, MAX_PATH, "%s/%s.spv", BIN_SHADERS_DIR, e->d_name);
@@ -117,7 +117,7 @@ int game_build() {
         "gcc", "-g", "-o", "./bin/game0", "./src/main.c", "./external/xdg-shell.c",
         "-D_DEBUG",
         "-I./include", "-I./src", "-I./external", include, lib,
-        "-lvulkan",
+        "-lvulkan", "-lm",
         "-lwayland-client",
          NULL
     };

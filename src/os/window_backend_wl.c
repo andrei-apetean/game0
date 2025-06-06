@@ -1,4 +1,10 @@
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>  //libwayland-protocols
@@ -7,14 +13,7 @@
 #include "game0.h"
 #include "private/base.h"
 #include "private/input.h"
-#include "private/win_bknd.h"
-
-#include <fcntl.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "private/window_backend.h"
 
 // evdev key code values copied from <linux/input-event-codes.h>
 #define P_KEY_RESERVED 0
@@ -95,8 +94,11 @@
 #define P_KEY_RIGHTALT 100
 #define P_KEY_LEFTMETA 125
 #define P_KEY_RIGHTMETA 126
+#define P_BUTTON_LEFT 272
+#define P_BUTTON_RIGHT 273
+#define P_BUTTON_MIDDLE 274
 
-struct wayland_bknd {
+typedef struct {
     struct wl_display*    display;
     struct wl_registry*   registry;
     struct wl_compositor* compositor;
@@ -114,7 +116,9 @@ struct wayland_bknd {
     struct xdg_surface*  xdg_surface;
     struct xdg_toplevel* toplevel;
     pfn_on_input_event   on_event;
-};
+    float                width;
+    float                height;
+} backend_wl;
 
 // todo: temporary
 static int create_shm_file(size_t size) {
@@ -127,7 +131,8 @@ static int create_shm_file(size_t size) {
     return fd;
 }
 
-static void create_shm_buffer(struct wayland_bknd* state, uint32_t width, uint32_t height) {
+static void create_shm_buffer(backend_wl* state, uint32_t width,
+                              uint32_t height) {
     int stride = width * 4;
     int size = stride * height;
 
@@ -244,7 +249,7 @@ static const struct wl_pointer_listener pointer_listnr = {
 
 static void setup_reg(void* data, struct wl_registry* registry, uint32_t name,
                       const char* interface, uint32_t version) {
-    struct wayland_bknd* state = data;
+    backend_wl* state = data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         state->compositor = wl_registry_bind(state->registry, name,
                                              &wl_compositor_interface, 1);
@@ -285,25 +290,31 @@ static void sh_config(void* data, struct xdg_surface* shell_surface,
 static void toplvl_config(void* data, struct xdg_toplevel* toplevel,
                           int32_t width, int32_t height,
                           struct wl_array* states) {
-    struct wayland_bknd* backend = data;
+    backend_wl* backend = data;
     ASSERT(backend);
+    backend->width = (float)width;
+    backend->height = (float)height;
     if (!backend->on_event) return;
-    struct input_ev e = {.window.width = width, .window.height = height};
+    input_ev e = {
+        .type = INPUT_EVENT_SIZE,
+        .window.width = width,
+        .window.height = height,
+    };
     backend->on_event(e);
 }
 
 static void toplvl_close(void* data, struct xdg_toplevel* toplevel) {
-    struct wayland_bknd* backend = data;
+    backend_wl* backend = data;
     ASSERT(backend);
     if (!backend->on_event) return;
-    struct input_ev e = {.type = INPUT_EVENT_QUIT};
+    input_ev e = {.type = INPUT_EVENT_QUIT};
     backend->on_event(e);
 }
 
 static void kb_key(void* data, struct wl_keyboard* keyboard, uint32_t serial,
                    uint32_t time, uint32_t key, uint32_t state) {
-    struct wayland_bknd* backend = data;
-    struct input_ev    ev = {
+    backend_wl* backend = data;
+    input_ev    ev = {
            .type = INPUT_EVENT_KEY,
            .key.code = evdev_to_keycode(key),
            .key.state = state,
@@ -350,12 +361,12 @@ static void pointer_leave(void* data, struct wl_pointer* pointer,
 
 static void pointer_motion(void* data, struct wl_pointer* pointer,
                            uint32_t time, wl_fixed_t sx, wl_fixed_t sy) {
-    struct wayland_bknd* backend = data;
+    backend_wl* backend = data;
     ASSERT(backend);
     if (!backend->on_event) return;
-    float           x = wl_fixed_to_double(sx);
-    float           y = wl_fixed_to_double(sy);
-    struct input_ev e = {
+    float    x = wl_fixed_to_double(sx);
+    float    y = wl_fixed_to_double(sy);
+    input_ev e = {
         .type = INPUT_EVENT_POINTER,
         .pointer.x = x,
         .pointer.y = y,
@@ -366,11 +377,14 @@ static void pointer_motion(void* data, struct wl_pointer* pointer,
 static void pointer_button(void* data, struct wl_pointer* pointer,
                            uint32_t serial, uint32_t time, uint32_t button,
                            uint32_t state) {
-    struct wayland_bknd* backend = data;
+    backend_wl* backend = data;
     ASSERT(backend);
     if (!backend->on_event) return;
-    struct input_ev e = {
-        .type = INPUT_EVENT_KEY, .key.code = button, .key.state = state};
+    input_ev e = {
+        .type = INPUT_EVENT_KEY,
+        .key.code = evdev_to_keycode(button),
+        .key.state = state,
+    };
     backend->on_event(e);
 }
 
@@ -380,10 +394,10 @@ static void pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time,
 ////// -------------------------- backend interface;
 //
 
-int32_t win_bknd_get_size() { return sizeof(struct wayland_bknd); }
+int32_t window_backend_get_size() { return sizeof(backend_wl); }
 
-int32_t win_bknd_startup(win_bknd** backend, struct window_cfg cfg) {
-    struct wayland_bknd* state = (struct wayland_bknd*)(*backend);
+int32_t window_backend_startup(window_backend** backend, window_cfg cfg) {
+    backend_wl* state = (backend_wl*)(*backend);
     ASSERT(state);
     memset(state, 0, sizeof(*state));
 
@@ -446,8 +460,8 @@ int32_t win_bknd_startup(win_bknd** backend, struct window_cfg cfg) {
     return 0;
 }
 
-void win_bknd_teardown(win_bknd* backend) {
-    struct wayland_bknd* state = (struct wayland_bknd*)backend;
+void window_backend_teardown(window_backend* backend) {
+    backend_wl* state = (backend_wl*)backend;
     ASSERT(state);
     xdg_toplevel_destroy(state->toplevel);
     xdg_surface_destroy(state->xdg_surface);
@@ -458,8 +472,8 @@ void win_bknd_teardown(win_bknd* backend) {
     wl_display_disconnect(state->display);
 }
 
-void win_bknd_poll_events(win_bknd* backend) {
-    struct wayland_bknd* state = (struct wayland_bknd*)backend;
+void window_backend_poll_events(window_backend* backend) {
+    backend_wl* state = (backend_wl*)backend;
     ASSERT(state);
 
     wl_display_dispatch(state->display);  // blocks until events arrive
@@ -468,21 +482,26 @@ void win_bknd_poll_events(win_bknd* backend) {
     // wl_display_flush(state->display); // flush requests to compositor
 }
 
-void win_bknd_attach_handler(win_bknd* backend, pfn_on_input_event handler) {
-    struct wayland_bknd* state = (struct wayland_bknd*)backend;
+void window_backend_attach_handler(window_backend*    backend,
+                                   pfn_on_input_event handler) {
+    backend_wl* state = (backend_wl*)backend;
     ASSERT(state);
     state->on_event = handler;
 }
 
-// todo hack
-struct window_info win_bknd_get_info(win_bknd* backend) {
-    struct wayland_bknd* state = (struct wayland_bknd*)backend;
+vec2 window_backend_window_size(window_backend* backend) {
+    backend_wl* state = (backend_wl*)backend;
     ASSERT(state);
-    struct window_info info = {
-        .win_api = 0,
-        .win_handle = state->surface,
-        .win_instance = state->display
-    };
+    return (vec2){state->width, state->height};
+}
+
+// todo hack
+window_info window_backend_get_info(window_backend* backend) {
+    backend_wl* state = (backend_wl*)backend;
+    ASSERT(state);
+    window_info info = {.win_api = 0,
+                        .win_handle = state->surface,
+                        .win_instance = state->display};
     return info;
 }
 
@@ -642,6 +661,12 @@ static uint32_t evdev_to_keycode(uint32_t evdev_code) {
             return KEY_RALT;
         case P_KEY_RIGHTMETA:
             return KEY_RMETA;
+        case P_BUTTON_LEFT:
+            return MOUSE_BUTTON_LEFT;
+        case P_BUTTON_MIDDLE:
+            return MOUSE_BUTTON_MIDDLE;
+        case P_BUTTON_RIGHT:
+            return MOUSE_BUTTON_RIGHT;
         default:
             return KEY_NONE;
     }

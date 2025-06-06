@@ -15,7 +15,7 @@
 #define INPUT_EVENT_SIZE 3
 #define INPUT_EVENT_QUIT 4
 
-struct input_ev{
+typedef struct {
     int32_t type;
     union {
         struct {
@@ -34,15 +34,15 @@ struct input_ev{
             int32_t height;
         } window;
     };
-};
+} input_ev;
 
 
-typedef void (*pfn_on_input_event)(struct input_ev);
+typedef void (*pfn_on_input_event)(input_ev);
 
-struct input {
+typedef struct {
     uint32_t keys[KB_MAX_KEYS];
     float pointer_x;
     float pointer_y;
     float last_pointer_x;
     float last_pointer_y;
-};
+} input_state;

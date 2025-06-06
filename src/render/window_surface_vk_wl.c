@@ -1,6 +1,6 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
-#include "vulkan_surface.h"
+#include "window_surface_vk.h"
 
 void create_wl_surface(VkInstance instance, VkAllocationCallbacks* alloc, VkSurfaceKHR* surface, void *wl_surface, void *wl_display) {
 VkWaylandSurfaceCreateInfoKHR ci = {
