@@ -56,27 +56,28 @@ int main() {
     float angle_x = 0;
     float angle_y = 0;
     vec3  translation = (vec3){.x = 0.0f, .y = 0.0f, .z = -3.0f};
+    vec3  camera = (vec3){.x = 0.0f, .y = 0.0f, .z = 0.0f};
     while (is_running()) {
         poll_events();
 
         vec2 delta = get_mouse_delta();
-        if (is_button_down(MOUSE_BUTTON_LEFT)) {
-            angle_x += delta.x;
-            angle_y += delta.y;
+        if (button_down(MOUSE_BUTTON_LEFT)) {
+            camera.x += delta.x * 0.1f;
+            camera.y += delta.y * 0.1f;
         }
-         if(is_button_down(MOUSE_BUTTON_RIGHT)) {
-             translation.x += delta.x * 0.1f;
-             translation.y += delta.y * 0.1f;
-             printf("RMB pressed!\n");
-         }
-        vec2 win_size = get_window_size();
+        if (button_down(MOUSE_BUTTON_RIGHT)) {
+            angle_x += delta.x * 0.1f;
+            angle_y += delta.y * 0.1f;
+        }
+        camera.z += get_mouse_scroll() * 0.1f;
+        vec2  win_size = get_window_size();
         float aspect_ratio = win_size.x / win_size.y;
-        float radians_x = angle_x * (M_PI / 180.0f);
-        float radians_y = angle_y * (M_PI / 180.0f);
-        mat4  proj =
-            m4_perspective(60.0f * (M_PI / 180.0f), aspect_ratio, 0.1f, 100.0f);
-        mat4 view = m4_translation(translation);
-        mat4 model = m4_mul(m4_rotation_y(radians_y), m4_rotation_x(radians_x));
+        float radians_x = deg2rad(angle_x);
+        float radians_y = deg2rad(angle_y);
+
+        mat4 proj = m4_perspective(deg2rad(60), aspect_ratio, 0.1f, 100.0f);
+        mat4 view = m4_translation(camera);
+        mat4 model = m4_mul(m4_rotation_x(radians_x), m4_rotation_y(radians_y));
 
         mat4 mvp = m4_mul(proj, m4_mul(view, model));
         m.mvp = mvp;

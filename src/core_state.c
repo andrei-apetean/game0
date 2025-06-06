@@ -24,8 +24,6 @@ void on_event(input_ev e) {
         case INPUT_EVENT_KEY: {
             if (e.key.code > 0 && e.key.code < KB_MAX_KEYS) {
                 core.input.keys[e.key.code] = e.key.state;
-                // printf("Key event: code %d, state %d\n", e.key.code,
-                // e.key.state);
             }
             break;
         }
@@ -35,7 +33,7 @@ void on_event(input_ev e) {
             break;
         }
         case INPUT_EVENT_SCROLL: {
-            // unused
+                core.input.scroll_delta = e.scroll.value;
             break;
         }
         case INPUT_EVENT_SIZE: {
@@ -106,37 +104,37 @@ void render_begin() { render_backend_render_begin(core.render_backend); }
 void draw_mesh(mesh* m) { render_backend_draw_mesh(core.render_backend, m); }
 void render_end() { render_backend_render_end(core.render_backend); }
 
-int32_t is_key_down(int32_t key) {
+int32_t key_down(int32_t key) {
     return (key > 0 && key < KB_MAX_KEYS)
                ? core.input.keys[key] == KEY_STATE_DOWN
                : 0;
 }
 
-int32_t is_key_pressed(int32_t key) {
+int32_t key_pressed(int32_t key) {
     return (key > 0 && key < KB_MAX_KEYS)
                ? core.input.keys[key] == KEY_STATE_PRESSED
                : 0;
 }
 
-int32_t is_key_released(int32_t key) {
+int32_t key_released(int32_t key) {
     return (key > 0 && key < KB_MAX_KEYS)
                ? core.input.keys[key] == KEY_STATE_RELEASED
                : 0;
 }
 
-int32_t is_button_down(int32_t button) {
+int32_t button_down(int32_t button) {
     return (button > 0 && button < KB_MAX_KEYS)
                ? core.input.keys[button] == KEY_STATE_DOWN
                : 0;
 }
 
-int32_t is_button_pressed(int32_t button) {
+int32_t button_pressed(int32_t button) {
     return (button > 0 && button < KB_MAX_KEYS)
                ? core.input.keys[button] == KEY_STATE_PRESSED
                : 0;
 }
 
-int32_t is_button_released(int32_t button) {
+int32_t button_released(int32_t button) {
     return (button > 0 && button < KB_MAX_KEYS)
                ? core.input.keys[button] == KEY_STATE_RELEASED
                : 0;
@@ -146,6 +144,10 @@ vec2 get_mouse_delta() {
         core.input.pointer_x - core.input.last_pointer_x,
             core.input.pointer_y - core.input.last_pointer_y,
     };
+}
+
+float get_mouse_scroll() {
+    return core.input.scroll_delta;
 }
 
 void process_input() {
@@ -160,8 +162,11 @@ void process_input() {
     }
     core.input.last_pointer_x = core.input.pointer_x;
     core.input.last_pointer_y = core.input.pointer_y;
+    core.input.scroll_delta = 0;
 }
 
+float deg2rad(float degrees) { return degrees * (PI / 180.0f);}
+float rad2deg(float radians) { return radians * (180.0f / PI); }
 
 vec2 v2_add(vec2 a, vec2 b) { return (vec2){a.x + b.x, a.y + b.y}; }
 vec2 v2_sub(vec2 a, vec2 b) { return (vec2){a.x - b.x, a.y - b.y}; }

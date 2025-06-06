@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define PI 3.14159265358979323846
+
 typedef struct {
     float x;
     float y;
@@ -23,6 +25,9 @@ typedef struct {
 typedef struct {
     float m[16];  // column major
 } mat4;
+
+float deg2rad(float degrees);
+float rad2deg(float radians);
 
 vec2  v2_add(vec2 a, vec2 b);
 vec2  v2_sub(vec2 a, vec2 b);
@@ -203,11 +208,12 @@ void render_begin();
 void draw_mesh(mesh* m);
 void render_end();
 
-int32_t is_key_down(int32_t key);
-int32_t is_key_pressed(int32_t key);
-int32_t is_key_released(int32_t key);
+int32_t key_down(int32_t key);
+int32_t key_pressed(int32_t key);
+int32_t key_released(int32_t key);
 
-int32_t is_button_down(int32_t button);
-int32_t is_button_pressed(int32_t button);
-int32_t is_button_released(int32_t button);
+int32_t button_down(int32_t button);
+int32_t button_pressed(int32_t button);
+int32_t button_released(int32_t button);
+float get_mouse_scroll();
 vec2 get_mouse_delta();

@@ -27,7 +27,7 @@ typedef struct {
             float y;
         } pointer;
         struct {
-            int32_t value;
+            float value;
         } scroll;
         struct {
             int32_t width;
@@ -45,4 +45,5 @@ typedef struct {
     float pointer_y;
     float last_pointer_x;
     float last_pointer_y;
+    float scroll_delta;
 } input_state;

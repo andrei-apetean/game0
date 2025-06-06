@@ -120,42 +120,6 @@ typedef struct {
     float                height;
 } backend_wl;
 
-// todo: temporary
-static int create_shm_file(size_t size) {
-    int fd = shm_open("/shm-buffer", O_RDWR | O_CREAT, 0600);
-    if (fd < 0) return -1;
-    if (ftruncate(fd, size) < 0) {
-        close(fd);
-        return -1;
-    }
-    return fd;
-}
-
-static void create_shm_buffer(backend_wl* state, uint32_t width,
-                              uint32_t height) {
-    int stride = width * 4;
-    int size = stride * height;
-
-    int fd = create_shm_file(size);
-    if (fd < 0) {
-        printf("Failed to create SHM file\n");
-        exit(1);
-    }
-
-    void* data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (data == MAP_FAILED) {
-        printf("Failed to mmap\n");
-        exit(1);
-    }
-
-    memset(data, 18, size);  // Fill buffer with white pixels
-
-    state->pool = wl_shm_create_pool(state->shm, fd, size);
-    state->buffer = wl_shm_pool_create_buffer(state->pool, 0, width, height,
-                                              stride, WL_SHM_FORMAT_XRGB8888);
-    close(fd);
-}
-
 ////// -------------------------- forward declarations;
 //
 static uint32_t evdev_to_keycode(uint32_t evdev_code);
@@ -261,11 +225,6 @@ static void setup_reg(void* data, struct wl_registry* registry, uint32_t name,
         xdg_wm_base_add_listener(state->shell, &sh_listnr, NULL);
         return;
     }
-    if (strcmp(interface, "wl_shm") == 0) {
-        state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
-        return;
-    }
-
     if (strcmp(interface, wl_seat_interface.name) == 0) {
         state->seat = wl_registry_bind(registry, name, &wl_seat_interface, 1);
         return;
@@ -280,11 +239,8 @@ static void sh_ping(void* data, struct xdg_wm_base* xdg_wm_base,
 static void sh_config(void* data, struct xdg_surface* shell_surface,
                       uint32_t serial) {
     xdg_surface_ack_configure(shell_surface, serial);
-    //    if (resize)
-    //    {
-    //        readyToResize = 1;
-    //    }
-    // printf("handle_shell_configure\n");
+    backend_wl* backend = data;
+    if (backend) wl_surface_commit(backend->surface);
 }
 
 static void toplvl_config(void* data, struct xdg_toplevel* toplevel,
@@ -292,8 +248,12 @@ static void toplvl_config(void* data, struct xdg_toplevel* toplevel,
                           struct wl_array* states) {
     backend_wl* backend = data;
     ASSERT(backend);
-    backend->width = (float)width;
-    backend->height = (float)height;
+    float win_width = (float)width;
+    float win_height = (float)height;
+    if (backend->width == win_width && backend->height == win_height) return;
+
+    backend->width = win_width;
+    backend->height = win_height;
     if (!backend->on_event) return;
     input_ev e = {
         .type = INPUT_EVENT_SIZE,
@@ -389,11 +349,19 @@ static void pointer_button(void* data, struct wl_pointer* pointer,
 }
 
 static void pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time,
-                         uint32_t axis, wl_fixed_t value) {}  // todo
+                         uint32_t axis, wl_fixed_t value) {
+    backend_wl* backend = data;
+    ASSERT(backend);
+    if (!backend->on_event) return;
+    input_ev e = {
+        .type = INPUT_EVENT_SCROLL,
+        .scroll.value = wl_fixed_to_double(value),
+    };
+    backend->on_event(e);
+}
 
 ////// -------------------------- backend interface;
 //
-
 int32_t window_backend_get_size() { return sizeof(backend_wl); }
 
 int32_t window_backend_startup(window_backend** backend, window_cfg cfg) {
@@ -432,7 +400,7 @@ int32_t window_backend_startup(window_backend** backend, window_cfg cfg) {
         printf("Failed to get xdg_surface!\n");
         return -1;
     }
-    xdg_surface_add_listener(state->xdg_surface, &sh_surf_listnr, NULL);
+    xdg_surface_add_listener(state->xdg_surface, &sh_surf_listnr, state);
 
     state->toplevel = xdg_surface_get_toplevel(state->xdg_surface);
     if (state->toplevel == NULL) {
@@ -442,20 +410,13 @@ int32_t window_backend_startup(window_backend** backend, window_cfg cfg) {
     xdg_toplevel_add_listener(state->toplevel, &toplvl_listnr, state);
     xdg_toplevel_set_title(state->toplevel, cfg.title);
 
-    create_shm_buffer(state, cfg.width, cfg.height);
-
-    // Commit the surface to display
-    wl_surface_attach(state->surface, state->buffer, 0, 0);
-    wl_surface_damage(state->surface, 0, 0, cfg.width, cfg.height);
-    wl_surface_commit(state->surface);
-
     if (state->seat) {
         state->keyboard = wl_seat_get_keyboard(state->seat);
         state->pointer = wl_seat_get_pointer(state->seat);
         wl_keyboard_add_listener(state->keyboard, &kb_listnr, state);
         wl_pointer_add_listener(state->pointer, &pointer_listnr, state);
-        // wl_pointer_add_listener(state->pointer, &pointer_listener, &app);
     }
+    wl_surface_commit(state->surface);
     wl_display_roundtrip(state->display);
     return 0;
 }
@@ -475,11 +436,19 @@ void window_backend_teardown(window_backend* backend) {
 void window_backend_poll_events(window_backend* backend) {
     backend_wl* state = (backend_wl*)backend;
     ASSERT(state);
+    wl_display_dispatch_pending(state->display);
 
-    wl_display_dispatch(state->display);  // blocks until events arrive
-    wl_display_flush(state->display);
-    // wl_display_dispatch_pending(state->display);
-    // wl_display_flush(state->display); // flush requests to compositor
+  while (wl_display_prepare_read(state->display) != 0) {
+        wl_display_dispatch_pending(state->display);
+    }
+
+    if (wl_display_read_events(state->display) != 0) {
+        fprintf(stderr, "Failed to read Wayland events!\n");
+        return;
+    }
+
+    wl_display_dispatch_pending(state->display);
+    wl_display_flush(state->display); 
 }
 
 void window_backend_attach_handler(window_backend*    backend,
