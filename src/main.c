@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "game0.h"
+#include "engine.h"
 #include "private/base.h"
 
 #ifndef M_PI
@@ -91,7 +91,7 @@ int main() {
     return 0;
 }
 
-#include "core_state.c"
+#include "engine.c"
 #include "render/render_backend_vk.c"
 #ifdef OS_LINUX
 #include "os/window_backend_wl.c"
