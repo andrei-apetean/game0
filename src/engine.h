@@ -200,13 +200,12 @@ typedef struct {
 int32_t startup(win_config cfg);
 int32_t teardown();
 int32_t is_running();
+int32_t poll_events();
 void    stop_running();
-void    poll_events();
-vec2    get_window_size();
 
-void render_begin();
+void begin_render();
 void draw_mesh(mesh* m);
-void render_end();
+void end_render();
 
 int32_t key_down(int32_t key);
 int32_t key_pressed(int32_t key);

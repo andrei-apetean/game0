@@ -36,9 +36,6 @@ typedef struct {
     };
 } input_ev;
 
-
-typedef void (*pfn_on_input_event)(input_ev);
-
 typedef struct {
     uint32_t keys[KB_MAX_KEYS];
     float pointer_x;
@@ -46,4 +43,4 @@ typedef struct {
     float last_pointer_x;
     float last_pointer_y;
     float scroll_delta;
-} input_state;
+} input;

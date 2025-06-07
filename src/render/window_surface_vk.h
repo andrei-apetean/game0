@@ -2,4 +2,5 @@
 
 #include <vulkan/vulkan_core.h>
 
-void create_wl_surface(VkInstance instance, VkAllocationCallbacks* alloc, VkSurfaceKHR* surface, void* wl_surface, void* wl_display);
+void create_wl_surface(VkInstance instance, VkAllocationCallbacks* alloc,
+                       VkSurfaceKHR* surface, void* win_handle);

@@ -1,4 +1,4 @@
-
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,8 +6,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
-#include "private/base.h"
-#include "private/render_backend.h"
+#include "render/render.h"
 #include "render/window_surface_vk.h"
 
 // todo
@@ -110,11 +109,11 @@ static void gpu_mesh_create(backend_vk* state, mesh* src, gpu_mesh* out);
 
 ////// -------------------------- interface implementation;
 //
-uint32_t render_backend_get_size() { return sizeof(backend_vk); }
+uint32_t render_get_size() { return sizeof(backend_vk); }
 
-int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
+int32_t render_startup(render** bknd, render_cfg cfg) {
     backend_vk* state = (backend_vk*)*bknd;
-    ASSERT(state);
+    assert(state);
     state->allocator = NULL;
     //----------- Instance
     {
@@ -138,7 +137,7 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
                 requested_extensions[1] = WL_SURFACE_EXT_NAME;
                 break;
             default:
-                ASSERT(0 && "Unknown window API!\n");
+                assert(0 && "Unknown window API!\n");
         }
 
 #ifdef _DEBUG
@@ -155,7 +154,8 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
             .pApplicationInfo = &app_info,
             .enabledExtensionCount = ext_count,
             .ppEnabledExtensionNames = requested_extensions,
-            .enabledLayerCount = ARR_SIZE(s_requested_layers),
+            .enabledLayerCount =
+                sizeof(s_requested_layers) / sizeof(*s_requested_layers),
             .ppEnabledLayerNames = s_requested_layers,
         };
         VkResult result =
@@ -213,12 +213,12 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
     switch (cfg.win_api) {
         case 0:
             create_wl_surface(state->instance, state->allocator,
-                              &state->surface, cfg.win_handle, cfg.win_inst);
+                              &state->surface, cfg.win_handle);
             break;
         default:
-            ASSERT(0 && "Unknown window API\n");
+            assert(0 && "Unknown window API\n");
     }
-    ASSERT(state->surface != VK_NULL_HANDLE &&
+    assert(state->surface != VK_NULL_HANDLE &&
            "Failed to create window surface");
 
     //----------- Physical Device
@@ -283,9 +283,9 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
 
         VkDeviceCreateInfo dev_ci = {
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .queueCreateInfoCount = ARR_SIZE(queue_ci),
+            .queueCreateInfoCount = sizeof(queue_ci) / sizeof(*queue_ci),
             .pQueueCreateInfos = queue_ci,
-            .enabledExtensionCount = ARR_SIZE(dev_exts),
+            .enabledExtensionCount = sizeof(dev_exts) / sizeof(*dev_exts),
             .ppEnabledExtensionNames = dev_exts,
             .pNext = &features,
         };
@@ -317,7 +317,8 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
                                              &supported_count, formats);
 
         uint32_t       format_found = 0;
-        const uint32_t desired_fmt_count = ARR_SIZE(desired_fmts);
+        const uint32_t desired_fmt_count =
+            sizeof(s_requested_layers) / sizeof(*s_requested_layers);
         for (size_t i = 0; i < desired_fmt_count; i++) {
             for (size_t j = 0; j < supported_count; j++) {
                 if (formats[j].format == desired_fmts[i] &&
@@ -422,9 +423,9 @@ int32_t render_backend_startup(render_backend** bknd, render_cfg cfg) {
     return 0;
 }
 
-void render_backend_render_begin(render_backend* bknd) {
+void render_begin(render* bknd) {
     backend_vk* state = (backend_vk*)bknd;
-    ASSERT(state);
+    assert(state);
 
     // Wait for previous frame to finish before starting this one
     vkWaitForFences(state->device, 1,
@@ -478,9 +479,9 @@ void render_backend_render_begin(render_backend* bknd) {
     // Ready to record draw calls here...
 }
 
-void render_backend_render_end(render_backend* bknd) {
+void render_end(render* bknd) {
     backend_vk* state = (backend_vk*)bknd;
-    ASSERT(state);
+    assert(state);
 
     uint32_t image_index = state->frames[state->current_frame].image_index;
 
@@ -524,9 +525,9 @@ void render_backend_render_end(render_backend* bknd) {
     state->current_frame = (state->current_frame + 1) % TARGET_FRAME_BUFFERS;
 }
 
-void render_backend_draw_mesh(render_backend* bknd, mesh* m) {
+void render_mesh(render* bknd, mesh* m) {
     backend_vk* state = (backend_vk*)bknd;
-    ASSERT(state);
+    assert(state);
     VkCommandBuffer cmd = state->frames[state->current_frame].cmd_buf;
 
     if (!m->uploaded) {
@@ -545,18 +546,18 @@ void render_backend_draw_mesh(render_backend* bknd, mesh* m) {
     vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
 }
 
-void     render_backend_resize(render_backend* bknd, vec2 dimensions) {
+void render_resize(render* bknd, vec2 dimensions) {
     backend_vk* state = (backend_vk*)bknd;
-    ASSERT(state);
+    assert(state);
     vkDeviceWaitIdle(state->device);
     destroy_swapchain(state);
     VkExtent2D size = (VkExtent2D){dimensions.x, dimensions.y};
     create_swapchain(state, size);
 }
 
-void render_backend_teardown(render_backend* bknd) {
+void render_teardown(render* bknd) {
     backend_vk* state = (backend_vk*)bknd;
-    ASSERT(state);
+    assert(state);
     vkDeviceWaitIdle(state->device);
     vkDestroyPipelineLayout(state->device, state->pipeline_layout,
                             state->allocator);
@@ -581,7 +582,7 @@ static void check(VkResult result, const char* msg, const char* file,
     if (result != VK_SUCCESS) {
         printf("Vulkan assertion failed `%s` with result %d in %s:%zu\n", msg,
                result, file, line);
-        ASSERT(0);
+        assert(0);
     } else {
         printf("Success `%s`: %d in %s:%zu\n", msg, result, file, line);
     }
@@ -676,7 +677,7 @@ static void create_swapchain(backend_vk* state, VkExtent2D size) {
 
     vkGetSwapchainImagesKHR(state->device, state->swapchain, &img_count,
                             images);
-    ASSERT(img_count <= TARGET_FRAME_BUFFERS);
+    assert(img_count <= TARGET_FRAME_BUFFERS);
 
     for (uint32_t i = 0; i < img_count; ++i) {
         state->frames[i].img = images[i];
@@ -771,7 +772,7 @@ static void destroy_swapchain(backend_vk* state) {
 VkShaderModule load_shader_module(VkDevice device, const char* filename,
                                   VkAllocationCallbacks* allocator) {
     FILE* f = fopen(filename, "rb");
-    ASSERT(f);
+    assert(f);
 
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
@@ -988,7 +989,7 @@ uint32_t find_memory_type(backend_vk* state, uint32_t type_filter,
         }
     }
 
-    ASSERT(0 && "Failed to find suitable memory type");
+    assert(0 && "Failed to find suitable memory type");
     return 0;
 }
 

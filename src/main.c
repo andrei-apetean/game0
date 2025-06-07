@@ -1,9 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
-
+#include "defines.h"
 #include "engine.h"
-#include "private/base.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -20,7 +19,7 @@ static vertex cube_vertices[] = {
     {{-0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 0.0f}},    // 7
 };
 
-static uint32_t vertices_count = ARR_SIZE(cube_vertices);
+static uint32_t vertices_count = sizeof(cube_vertices) / sizeof(*cube_vertices);
 
 static uint16_t cube_indices[] = {
     // Front face
@@ -35,7 +34,7 @@ static uint16_t cube_indices[] = {
     3, 2, 6, 6, 7, 3,
     // Bottom face
     4, 5, 1, 1, 0, 4};
-static uint32_t index_count = ARR_SIZE(cube_indices);
+static uint32_t index_count = sizeof(cube_indices)/sizeof(*cube_indices);
 
 int main() {
     printf("Hello world!\n");
@@ -57,9 +56,7 @@ int main() {
     float angle_y = 0;
     vec3  translation = (vec3){.x = 0.0f, .y = 0.0f, .z = -3.0f};
     vec3  camera = (vec3){.x = 0.0f, .y = 0.0f, .z = 0.0f};
-    while (is_running()) {
-        poll_events();
-
+    while (poll_events()) {
         vec2 delta = get_mouse_delta();
         if (button_down(MOUSE_BUTTON_LEFT)) {
             camera.x += delta.x * 0.1f;
@@ -70,20 +67,20 @@ int main() {
             angle_y += delta.y * 0.1f;
         }
         camera.z += get_mouse_scroll() * 0.1f;
-        vec2  win_size = get_window_size();
-        float aspect_ratio = win_size.x / win_size.y;
-        float radians_x = deg2rad(angle_x);
-        float radians_y = deg2rad(angle_y);
+        // vec2  win_size = get_window_size();
+        // float aspect_ratio = win_size.x / win_size.y;
+        // float radians_x = deg2rad(angle_x);
+        // float radians_y = deg2rad(angle_y);
 
-        mat4 proj = m4_perspective(deg2rad(60), aspect_ratio, 0.1f, 100.0f);
-        mat4 view = m4_translation(camera);
-        mat4 model = m4_mul(m4_rotation_x(radians_x), m4_rotation_y(radians_y));
+        // mat4 proj = m4_perspective(deg2rad(60), aspect_ratio, 0.1f, 100.0f);
+        // mat4 view = m4_translation(camera);
+        // mat4 model = m4_mul(m4_rotation_x(radians_x), m4_rotation_y(radians_y));
 
-        mat4 mvp = m4_mul(proj, m4_mul(view, model));
-        m.mvp = mvp;
-        render_begin();
-        draw_mesh(&m);
-        render_end();
+        // mat4 mvp = m4_mul(proj, m4_mul(view, model));
+        // m.mvp = mvp;
+        begin_render();
+        // draw_mesh(&m);
+        end_render();
     }
 
     teardown();
@@ -92,11 +89,9 @@ int main() {
 }
 
 #include "engine.c"
-#include "render/render_backend_vk.c"
-#ifdef OS_LINUX
-#include "os/window_backend_wl.c"
+#include "render/render_vk.c"
+#ifdef GAME0_LINUX
 #include "render/window_surface_vk_wl.c"
-#include "system_posix.c"
 #else
 #error "Unsupported backend!"
 #endif  // OS_LINUX
