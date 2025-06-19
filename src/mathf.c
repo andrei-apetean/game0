@@ -1,4 +1,5 @@
 #include "mathf.h"
+
 #include "math.h"
 
 float deg2rad(float degrees) { return degrees * (PI / 180.0f); }
@@ -117,15 +118,49 @@ mat4 m4_rotation_z(float radians) {
     return result;
 }
 
-mat4 m4_perspective(float fov_radians, float aspect, float near_z,
-                    float far_z) {
-    float f = 1.0f / tanf(fov_radians / 2.0f);
-    mat4  result = {0};
-    result.m[0] = f / aspect;
-    result.m[5] = f;
-    result.m[10] = (far_z + near_z) / (near_z - far_z);
-    result.m[11] = -1.0f;
-    result.m[14] = (2.0f * far_z * near_z) / (near_z - far_z);
+mat4 m4_perspective(float fov_radians, float aspect, float near, float far) {
+    float tanHalfFovy = tanf(fov_radians / 2.0f);
+    mat4 result = {0};
+
+    result.m[0]  = 1.0f / (aspect * tanHalfFovy);  // [0][0]
+    result.m[5]  = 1.0f / tanHalfFovy;             // [1][1]
+    result.m[10] = far / (far - near);             // [2][2]
+    result.m[11] = 1.0f;                           // [2][3]
+    result.m[14] = -(far * near) / (far - near);   // [3][2]
+
+    return result;
+}
+
+mat4 m4_look_at(vec3 eye, vec3 center, vec3 up) {
+    // Forward vector points *towards* positive Z axis (center - eye)
+    vec3 f = v3_normalize(v3_sub(center, eye));  // forward (looking direction)
+    vec3 s = v3_normalize(v3_cross(f, up));      // right
+    vec3 u = v3_cross(s, f);                      // recalculated up vector
+
+    mat4 result = m4_identity();
+
+    // Column-major order matching your projection
+    result.m[0] = s.x;
+    result.m[1] = u.x;
+    result.m[2] = f.x;      // Forward vector *positive* here
+    result.m[3] = 0.0f;
+
+    result.m[4] = s.y;
+    result.m[5] = u.y;
+    result.m[6] = f.y;
+    result.m[7] = 0.0f;
+
+    result.m[8] = s.z;
+    result.m[9] = u.z;
+    result.m[10] = f.z;
+    result.m[11] = 0.0f;
+
+    // Translation (dot products)
+    result.m[12] = -v3_dot(s, eye);
+    result.m[13] = -v3_dot(u, eye);
+    result.m[14] = -v3_dot(f, eye);
+    result.m[15] = 1.0f;
+
     return result;
 }
 

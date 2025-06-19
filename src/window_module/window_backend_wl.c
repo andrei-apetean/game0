@@ -1,7 +1,7 @@
-#include "modules/window_module.h"
+#include "window_module/window.h"
 
 #ifdef WINDOW_BACKEND_LINUX
-#include "window_module_backend.h"
+#include "window_module/window_backend.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -36,7 +36,7 @@ typedef struct {
     window_close_handler   close_handler;
     float                  width;
     float                  height;
-} window_module_state_wl;
+} window_state_wl;
 
 ////// -------------------------- forward declarations;
 
@@ -131,10 +131,10 @@ static const struct wl_pointer_listener pointer_listener = {
 
 ////// -------------------------- interface implementation;
 
-int32_t get_backend_state_size_wl() { return sizeof(window_module_state_wl); }
+int32_t get_backend_state_size_wl() { return sizeof(window_state_wl); }
 
-int32_t startup_wl(window_module_state* state) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+int32_t startup_wl(window_state* state) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->handle.display = wl_display_connect(NULL);
     if (backend->handle.display == NULL) {
@@ -157,12 +157,11 @@ int32_t startup_wl(window_module_state* state) {
     return 0;
 }
 
-int32_t create_window_wl(window_module_state* state, uint32_t width,
-                         uint32_t height, const char* title) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+int32_t create_window_wl(window_state* state, window_params* params) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
-    backend->width = width;
-    backend->height = height;
+    backend->width = params->width;
+    backend->height = params->height;
     backend->handle.surface = wl_compositor_create_surface(backend->compositor);
     if (backend->handle.surface == NULL) {
         printf("Failed to create wayland surface!\n");
@@ -184,9 +183,9 @@ int32_t create_window_wl(window_module_state* state, uint32_t width,
         return -1;
     }
     xdg_toplevel_add_listener(backend->toplevel, &toplevel_listener, backend);
-    xdg_toplevel_set_title(backend->toplevel, title);
-    xdg_toplevel_set_app_id(backend->toplevel, title);
-    xdg_toplevel_set_fullscreen(backend->toplevel, NULL);
+    xdg_toplevel_set_title(backend->toplevel, params->title);
+    xdg_toplevel_set_app_id(backend->toplevel, params->title);
+    // xdg_toplevel_set_fullscreen(backend->toplevel, NULL);
 
     if (backend->seat) {
         backend->keyboard = wl_seat_get_keyboard(backend->seat);
@@ -199,22 +198,22 @@ int32_t create_window_wl(window_module_state* state, uint32_t width,
     return 0;
 }
 
-void destroy_window_wl(window_module_state* state) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+void destroy_window_wl(window_state* state) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     xdg_toplevel_destroy(backend->toplevel);
     xdg_surface_destroy(backend->xdg_surface);
     wl_surface_destroy(backend->handle.surface);
 }
 
-void* get_window_handle_wl(window_module_state* state) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+void* get_window_handle_wl(window_state* state) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     return &backend->handle;
 }
 
-void poll_events_wl(window_module_state* state) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+void poll_events_wl(window_state* state) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     wl_display_dispatch_pending(backend->handle.display);
 
@@ -230,25 +229,25 @@ void poll_events_wl(window_module_state* state) {
     wl_display_flush(backend->handle.display);
 }
 
-void teardown_wl(window_module_state* state) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+void teardown_wl(window_state* state) {
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     xdg_wm_base_destroy(backend->shell);
     wl_compositor_destroy(backend->compositor);
     wl_registry_destroy(backend->registry);
     wl_display_disconnect(backend->handle.display);
 }
-void get_window_size_wl(window_module_state* state, uint32_t* width,
+void get_window_size_wl(window_state* state, uint32_t* width,
                         uint32_t* height) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     *width = backend->width;
     *height = backend->height;
 }
 
-void set_key_handler_wl(window_module_state* state, pfn_keyboard_key handler,
+void set_key_handler_wl(window_state* state, pfn_keyboard_key handler,
                         void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->key_handler = (keyboard_key_handler){
         .on_key = handler,
@@ -256,9 +255,9 @@ void set_key_handler_wl(window_module_state* state, pfn_keyboard_key handler,
     };
 }
 
-void set_pointer_button_handler_wl(window_module_state* state,
+void set_pointer_button_handler_wl(window_state* state,
                                    pfn_pointer_button handler, void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->button_handler = (pointer_button_handler){
         .on_button = handler,
@@ -266,9 +265,9 @@ void set_pointer_button_handler_wl(window_module_state* state,
     };
 }
 
-void set_pointer_motion_handler_wl(window_module_state* state,
+void set_pointer_motion_handler_wl(window_state* state,
                                    pfn_pointer_motion handler, void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->motion_handler = (pointer_motion_handler){
         .on_motion = handler,
@@ -276,9 +275,9 @@ void set_pointer_motion_handler_wl(window_module_state* state,
     };
 }
 
-void set_pointer_axis_handler_wl(window_module_state* state,
+void set_pointer_axis_handler_wl(window_state* state,
                                  pfn_pointer_axis handler, void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->axis_handler = (pointer_axis_handler){
         .on_axis = handler,
@@ -286,9 +285,9 @@ void set_pointer_axis_handler_wl(window_module_state* state,
     };
 }
 
-void set_window_size_handler_wl(window_module_state* state,
+void set_window_size_handler_wl(window_state* state,
                                 pfn_window_size handler, void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->size_handler = (window_size_handler){
         .on_size = handler,
@@ -296,9 +295,9 @@ void set_window_size_handler_wl(window_module_state* state,
     };
 }
 
-void set_window_close_handler_wl(window_module_state* state,
+void set_window_close_handler_wl(window_state* state,
                                  pfn_window_close handler, void* user) {
-    window_module_state_wl* backend = (window_module_state_wl*)state;
+    window_state_wl* backend = (window_state_wl*)state;
     assert(backend);
     backend->close_handler = (window_close_handler){
         .on_close = handler,
@@ -306,7 +305,7 @@ void set_window_close_handler_wl(window_module_state* state,
     };
 }
 
-void load_window_module_backend_wl(window_module_backend* backend) {
+void load_window_module_backend_wl(window_backend* backend) {
     backend->get_backend_state_size = get_backend_state_size_wl;
     backend->startup = startup_wl;
     backend->teardown = teardown_wl;
@@ -327,7 +326,7 @@ void load_window_module_backend_wl(window_module_backend* backend) {
 static void setup_registry(void* data, struct wl_registry* registry,
                            uint32_t name, const char* interface,
                            uint32_t version) {
-    window_module_state_wl* state = data;
+    window_state_wl* state = data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         state->compositor = wl_registry_bind(state->registry, name,
                                              &wl_compositor_interface, 1);
@@ -353,19 +352,17 @@ static void shell_ping(void* data, struct xdg_wm_base* xdg_wm_base,
 static void shell_config(void* data, struct xdg_surface* shell_surface,
                          uint32_t serial) {
     xdg_surface_ack_configure(shell_surface, serial);
-    window_module_state_wl* backend = data;
-    printf("Shell config\n");
+    window_state_wl* backend = data;
     if (backend) wl_surface_commit(backend->handle.surface);
 }
 
 static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
                             int32_t width, int32_t height,
                             struct wl_array* states) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     assert(backend);
     float win_width = (float)width;
     float win_height = (float)height;
-    printf("Toplevel config\n");
     if (backend->width == win_width && backend->height == win_height) return;
 
     backend->width = win_width;
@@ -378,7 +375,7 @@ static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
 }
 
 static void toplevel_close(void* data, struct xdg_toplevel* toplevel) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     assert(backend);
     if (backend->close_handler.on_close) {
         backend->close_handler.on_close(backend->close_handler.user_data);
@@ -387,7 +384,7 @@ static void toplevel_close(void* data, struct xdg_toplevel* toplevel) {
 
 static void kb_key(void* data, struct wl_keyboard* keyboard, uint32_t serial,
                    uint32_t time, uint32_t key, uint32_t state) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     if (backend->key_handler.on_key) {
         pfn_keyboard_key on_key = backend->key_handler.on_key;
         void*            data = backend->key_handler.user_data;
@@ -434,7 +431,7 @@ static void pointer_leave(void* data, struct wl_pointer* pointer,
 
 static void pointer_motion(void* data, struct wl_pointer* pointer,
                            uint32_t time, wl_fixed_t sx, wl_fixed_t sy) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     assert(backend);
     if (backend->motion_handler.on_motion) {
         float              x = wl_fixed_to_double(sx);
@@ -449,7 +446,7 @@ static void pointer_motion(void* data, struct wl_pointer* pointer,
 static void pointer_button(void* data, struct wl_pointer* pointer,
                            uint32_t serial, uint32_t time, uint32_t button,
                            uint32_t state) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     assert(backend);
     if (backend->button_handler.on_button) {
         pfn_pointer_button on_button = backend->button_handler.on_button;
@@ -461,7 +458,7 @@ static void pointer_button(void* data, struct wl_pointer* pointer,
 
 static void pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time,
                          uint32_t axis, wl_fixed_t value) {
-    window_module_state_wl* backend = data;
+    window_state_wl* backend = data;
     assert(backend);
     if (backend->button_handler.on_button) {
         float            scroll = wl_fixed_to_double(value);

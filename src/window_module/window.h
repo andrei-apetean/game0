@@ -2,19 +2,15 @@
 
 #include <stdint.h>
 
-#include "core.h"
-
 #if defined(_WIN32) || defined(_WIN64)
 #define WINDOW_BACKEND_WIN32
 #elif defined(__linux__)
-#define WINDOW_BACKEND_LINUX 
+#define WINDOW_BACKEND_LINUX
 #endif
 
 #define WINDOW_BACKEND_WL_ID 0
-#define WINDOW_BACKEND_WIN32_ID 1
-
-#define WINDOW_MODULE_ID 0
-#define WINDOW_MODULE_NAME "window_module"
+#define WINDOW_BACKEND_XCB_ID 1
+#define WINDOW_BACKEND_WIN32_ID 2
 
 #define KEY_NONE 0
 #define KEY_A 0x04
@@ -120,7 +116,13 @@
 #define MOUSE_BUTTON_RIGHT MOUSE_BUTTON1
 #define MOUSE_BUTTON_MIDDLE MOUSE_BUTTON2
 
-typedef struct window_module_state window_module_state;
+typedef struct window_state window_state;
+
+typedef struct {
+    uint32_t    width;
+    uint32_t    height;
+    const char* title;
+} window_params;
 
 typedef void (*pfn_keyboard_key)(int32_t key, int32_t state, void* user);
 typedef void (*pfn_pointer_button)(int32_t key, int32_t state, void* user);
@@ -129,19 +131,18 @@ typedef void (*pfn_pointer_axis)(float value, void* user);
 typedef void (*pfn_window_size)(int32_t width, int32_t height, void* user);
 typedef void (*pfn_window_close)(void* user);
 
-module_info register_window_module();
-
-uint32_t window_get_backend_id();
-int32_t  window_create(uint32_t width, uint32_t height, const char* title);
+void     window_initialize();
+void     window_terminate();
 void     window_poll_events();
 void     window_destroy();
+uint32_t window_get_backend_id();
+int32_t  window_create(window_params* params);
 
-void window_set_key_handler(pfn_keyboard_key on_key, void* user_data);
-void window_set_button_handler(pfn_pointer_button on_button, void* user_data);
-void window_set_motion_handler(pfn_pointer_motion on_motion, void* user_data);
-void window_set_axis_handler(pfn_pointer_axis on_axis, void* user_data);
-void window_set_size_handler(pfn_window_size on_size, void* user_data);
-void window_set_close_handler(pfn_window_close on_close, void* user_data);
-void window_get_size(uint32_t* width, uint32_t* height);
+void  window_set_key_handler(pfn_keyboard_key on_key, void* user_data);
+void  window_set_button_handler(pfn_pointer_button on_button, void* user_data);
+void  window_set_motion_handler(pfn_pointer_motion on_motion, void* user_data);
+void  window_set_axis_handler(pfn_pointer_axis on_axis, void* user_data);
+void  window_set_size_handler(pfn_window_size on_size, void* user_data);
+void  window_set_close_handler(pfn_window_close on_close, void* user_data);
+void  window_get_size(uint32_t* width, uint32_t* height);
 void* window_get_native_handle();
-

@@ -2,7 +2,8 @@
 
 
 #define PI 3.14159265358979323846
-
+#define HALF_PI PI / 2
+#define TWO_PI PI * 2
 typedef struct {
     float x;
     float y;
@@ -70,4 +71,5 @@ mat4 m4_rotation_x(float radians);
 mat4 m4_rotation_y(float radians);
 mat4 m4_rotation_z(float radians);
 mat4 m4_perspective(float fov_radians, float aspect, float near_z, float far_z);
+mat4 m4_look_at(vec3 eye, vec3 center, vec3 up);
 mat4 m4_mul(mat4 a, mat4 b);

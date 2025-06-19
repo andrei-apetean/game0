@@ -3,16 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
+#include "render_module/render_backend.h"
 
-#include "render_module_backend.h"
+#include "render_backend_vk.h"
 
 // todo temp
-#include "modules/window_module.h"
+#include "modules/window.h"
 
 // todo
 #define CLAMP(x, min, max) (((x) < (min)) ? (min) : ((x) > (max)) ? (max) : (x))
 
-#define WL_SURFACE_EXT_NAME "VK_KHR_wayland_surface"
+WIN32
 #define TARGET_FRAME_BUFFERS 3
 
 static VkBool32 debug_utils_callback(
@@ -94,7 +95,7 @@ static VkVertexInputBindingDescription get_binding_description();
 static void get_attribute_descriptions(VkVertexInputAttributeDescription* attr);
 
 ////// -------------------------- interface implementation;
-int32_t startup_vk(render_module_state* state) {
+int32_t startup_vk(render_state* state) {
     backend_vk* backend = (backend_vk*)state;
     assert(backend);
     backend->allocator = NULL;
@@ -405,7 +406,7 @@ int32_t startup_vk(render_module_state* state) {
 
 int32_t get_backend_state_size_vk() { return sizeof(backend_vk); }
 
-void render_begin_vk(render_module_state* state) {
+void render_begin_vk(render_state* state) {
     backend_vk* backend = (backend_vk*)state;
     assert(backend);
 
@@ -459,7 +460,7 @@ void render_begin_vk(render_module_state* state) {
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-void render_end_vk(render_module_state* state) {
+void render_end_vk(render_state* state) {
     backend_vk* backend = (backend_vk*)state;
     assert(backend);
 
@@ -506,7 +507,7 @@ void render_end_vk(render_module_state* state) {
         (backend->current_frame + 1) % TARGET_FRAME_BUFFERS;
 }
 
-void resize_vk(render_module_state* state, uint32_t width, uint32_t height) {
+void resize_vk(render_state* state, uint32_t width, uint32_t height) {
     
     backend_vk* backend = (backend_vk*)state;
     assert(backend);
@@ -516,7 +517,7 @@ void resize_vk(render_module_state* state, uint32_t width, uint32_t height) {
     create_swapchain(backend, size);
 }
 
-void teardown_vk(render_module_state* state) {
+void teardown_vk(render_state* state) {
     backend_vk* backend = (backend_vk*)state;
     assert(backend);
     vkDeviceWaitIdle(backend->device);
@@ -540,14 +541,6 @@ void teardown_vk(render_module_state* state) {
 #endif  // _DEBUG
 }
 
-void load_render_module_backend_vk(render_module_backend* backend) {
-    backend->startup = startup_vk;
-    backend->teardown = teardown_vk;
-    backend->get_backend_state_size = get_backend_state_size_vk;
-    backend->render_begin = render_begin_vk;
-    backend->render_end = render_end_vk;
-    backend->resize = resize_vk;
-}
 
 ////// -------------------------- internal implementation;
 
@@ -929,8 +922,6 @@ static void create_swapchain(backend_vk* state, VkExtent2D size) {
     free(images);
 }
 
-#include <vulkan/vulkan_core.h>
-#include <vulkan/vulkan_wayland.h>
 
 typedef struct {
     struct wl_display* display;
@@ -948,3 +939,4 @@ void create_wl_surface(VkInstance instance, VkAllocationCallbacks* alloc,
     *surface = VK_NULL_HANDLE;
     vkCreateWaylandSurfaceKHR(instance, &ci, alloc, surface);
 };
+*/
