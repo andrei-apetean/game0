@@ -1,30 +1,9 @@
 #pragma once 
-
+#include "math_types.h"
 
 #define PI 3.14159265358979323846
 #define HALF_PI PI / 2
 #define TWO_PI PI * 2
-typedef struct {
-    float x;
-    float y;
-} vec2;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-} vec3;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-    float w;
-} vec4;
-
-typedef struct {
-    float m[16];  // column major
-} mat4;
 
 float deg2rad(float degrees);
 float rad2deg(float radians);

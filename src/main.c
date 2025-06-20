@@ -83,8 +83,8 @@ int main() {
 
     };
 
-    if (window_create(&wparams) != 0) {
-        return -1;
+    if (window_create(&wparams) != 0) return -1;
+    
 
     window_set_close_handler(on_window_close, NULL);
     window_set_size_handler(on_window_resize, NULL);
@@ -134,8 +134,8 @@ int main() {
         render_begin();
         for (int i = 0; i < NUM_CUBES; i++) {
             cube_angles[i] += delta_time * 10;
-            mat4  model = create_model_matrix(cube_positions[i], cube_angles[i]);
-            mat4  mvp = m4_mul(camera, m4_mul(view, model));
+            mat4 model = create_model_matrix(cube_positions[i], cube_angles[i]);
+            mat4 mvp = m4_mul(camera, m4_mul(view, model));
             render_draw(&cube, mvp);
         }
         render_end();

@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "mathf.h"
+#include "math_types.h"
 #include "render_types.h"
 
 typedef struct {
