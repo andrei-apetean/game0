@@ -59,12 +59,6 @@ mat4 create_model_matrix(vec3 position, float rotation_degrees) {
     return m4_mul(model, m4_rotation_y(deg2rad(rotation_degrees)));
 }
 
-double get_time_seconds() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec * 1e-9;
-}
-
 void on_window_close(void* user) { is_running = 0; }
 
 void on_window_resize(int32_t w, int32_t h, void* user) {
@@ -86,11 +80,11 @@ int main() {
         .width = 1920,
         .height = 1080,
         .title = "game_0",
+
     };
 
     if (window_create(&wparams) != 0) {
         return -1;
-    }
 
     window_set_close_handler(on_window_close, NULL);
     window_set_size_handler(on_window_resize, NULL);
@@ -138,7 +132,6 @@ int main() {
         }
         window_poll_events();
         render_begin();
-        double time = get_time_seconds();
         for (int i = 0; i < NUM_CUBES; i++) {
             cube_angles[i] += delta_time * 10;
             mat4  model = create_model_matrix(cube_positions[i], cube_angles[i]);
