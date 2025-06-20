@@ -11,14 +11,15 @@ typedef struct {
 } device_vk;
 
 typedef struct {
-    VkImage       color_img;
-    VkImageView   color_img_view;
-    VkImage       depth_img;
-    VkImageView   depth_img_view;
-    VkFramebuffer framebuffer;
-    VkSemaphore   image_available;
-    VkSemaphore   render_finished;
-    VkFence       inflight;
+    VkImage        color_img;
+    VkImageView    color_img_view;
+    VkImage        depth_img;
+    VkImageView    depth_img_view;
+    VkDeviceMemory depth_memory;
+    VkFramebuffer  framebuffer;
+    VkSemaphore    image_available;
+    VkSemaphore    render_finished;
+    VkFence        inflight;
 } swapchain_frame;
 
 typedef struct {
@@ -87,16 +88,19 @@ typedef struct {
 void init_instance_vk(VkInstance* inst, VkAllocationCallbacks* allocator,
                       uint32_t window_api);
 
-void init_physical_device_vk(device_selection_params* params);
-void init_logical_device_vk(device_creation_params* params);
-void create_buffer_vk(render_vk state, VkMemoryPropertyFlags properties,
-                      buffer_vk* buffer, uint32_t size,
-                      VkBufferUsageFlags usage_flags);
-void upload_to_gpu_vk(render_vk state, buffer_vk* buffer, void* data,
-                      uint32_t size);
+void    init_physical_device_vk(device_selection_params* params);
+void    init_logical_device_vk(device_creation_params* params);
+int32_t find_memory_type(VkPhysicalDevice dev, uint32_t memory_type_bits,
+                         uint32_t memory_type);
+void    create_buffer_vk(render_vk state, VkMemoryPropertyFlags properties,
+                         buffer_vk* buffer, uint32_t size,
+                         VkBufferUsageFlags usage_flags);
+void    upload_to_gpu_vk(render_vk state, buffer_vk* buffer, void* data,
+                         uint32_t size);
 
-void init_renderpass_vk(VkDevice device, VkAllocationCallbacks* alloc,
-                        VkRenderPass* renderpass, VkFormat format);
+void init_renderpass_vk(VkDevice device, VkAllocationCallbacks* allocator,
+                        VkRenderPass* renderpass, VkFormat format,
+                        VkFormat depth_format);
 
 void init_swapchain_vk(swapchain_creation_params* params);
 void destroy_swapchain_vk(VkDevice dev, VkAllocationCallbacks* alloc,

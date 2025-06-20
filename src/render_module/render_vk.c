@@ -76,6 +76,7 @@ void init_instance_vk(VkInstance* inst, VkAllocationCallbacks* allocator,
         printf("VkInstance created!\n");
     } else {
         printf("VkInstance creation failed with code %d!\n", result);
+        assert(0);
     }
 }
 
@@ -155,6 +156,7 @@ void init_logical_device_vk(device_creation_params* params) {
         printf("VkDevice created!\n");
     } else {
         printf("VkDevice creation failed with code %d!\n", result);
+        assert(0);
     }
     // todo: proper queues
     VkDevice d = *(params->device);
@@ -162,9 +164,10 @@ void init_logical_device_vk(device_creation_params* params) {
 }
 
 void init_renderpass_vk(VkDevice device, VkAllocationCallbacks* allocator,
-                        VkRenderPass* renderpass, VkFormat format) {
+                        VkRenderPass* renderpass, VkFormat format,
+                        VkFormat depth_format) {
     VkAttachmentDescription depth_attachment = {
-        .format = format,
+        .format = depth_format,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -220,6 +223,7 @@ void init_renderpass_vk(VkDevice device, VkAllocationCallbacks* allocator,
         printf("VkRenderPass created!\n");
     } else {
         printf("VkRenderPass creation failed with code %d!\n", result);
+        assert(0);
     }
 }
 
@@ -264,8 +268,10 @@ void destroy_swapchain_vk(VkDevice dev, VkAllocationCallbacks* alloc,
     vkDeviceWaitIdle(dev);
     for (uint32_t i = 0; i < swapchain.frame_count; i++) {
         swapchain_frame frame = swapchain.frames[i];
-        // vkDestroyImage(dev, swapchain.images[i], alloc);
+        vkDestroyImage(dev, swapchain.frames[i].depth_img, alloc);
+        vkFreeMemory(dev, frame.depth_memory, alloc);
         vkDestroyImageView(dev, frame.color_img_view, alloc);
+        vkDestroyImageView(dev, frame.depth_img_view, alloc);
         vkDestroyFramebuffer(dev, frame.framebuffer, alloc);
         vkDestroySemaphore(dev, frame.image_available, alloc);
         vkDestroySemaphore(dev, frame.render_finished, alloc);
@@ -450,6 +456,7 @@ void create_graphics_pipeline(VkDevice device, VkRenderPass renderpass,
         printf("VkPipeline created!\n");
     } else {
         printf("VkPipeline creation failed with code %d!\n", result);
+        assert(0);
     }
 }
 
@@ -550,6 +557,7 @@ void create_buffer_vk(render_vk state, VkMemoryPropertyFlags properties,
         printf("vkCreateBuffer created!\n");
     } else {
         printf("vkCreateBuffer creation failed with code %d!\n", result);
+        assert(0);
     }
 
     VkMemoryRequirements mem_reqs;
@@ -592,6 +600,7 @@ void create_buffer_vk(render_vk state, VkMemoryPropertyFlags properties,
         printf("vkCreateBuffer created!\n");
     } else {
         printf("vkCreateBuffer creation failed with code %d!\n", result);
+        assert(0);
     }
     vkBindBufferMemory(state.device.handle, buffer->handle, buffer->memory, 0);
     static uint32_t id = 0;
@@ -685,6 +694,7 @@ static void create_swapchain(swapchain_creation_params* params) {
         printf("VkSwapchainKHR created!\n");
     } else {
         printf("VkSwapchainKHR creation failed with code %d!\n", result);
+        assert(0);
     }
     VkSwapchainKHR sc = params->swapchain->handle;
     uint32_t       img_count = 0;
@@ -692,14 +702,14 @@ static void create_swapchain(swapchain_creation_params* params) {
     printf("Desired number of frames: %d\n", frame_count);
     printf("Retrieved swapchain img count: %d!\n", img_count);
     assert(img_count <= frame_count);
-    VkImage* imgs = malloc(sizeof(VkImage) * img_count);
-    vkGetSwapchainImagesKHR(dev, sc, &img_count, imgs);
+    VkImage* color_imgs = malloc(sizeof(VkImage) * img_count);
+    vkGetSwapchainImagesKHR(dev, sc, &img_count, color_imgs);
     swapchain_frame* frames = params->swapchain->frames;
     for (uint32_t i = 0; i < img_count; ++i) {
-        frames[i].color_img = imgs[i];
-        VkImageViewCreateInfo view_info = {
+        frames[i].color_img = color_imgs[i];
+        VkImageViewCreateInfo color_view_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = imgs[i],
+            .image = color_imgs[i],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = params->swapchain->format.format,
             .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -715,16 +725,16 @@ static void create_swapchain(swapchain_creation_params* params) {
                     .layerCount = 1,
                 },
         };
-        result = vkCreateImageView(dev, &view_info, params->allocator,
+        result = vkCreateImageView(dev, &color_view_info, params->allocator,
                                    &frames[i].color_img_view);
 
         if (result == VK_SUCCESS) {
             printf("VkImageView %d created!\n", i);
         } else {
             printf("VkImageView %d creation failed with code %d!\n", i, result);
+            assert(0);
         }
         // depth attachments
-
         VkImageCreateInfo depth_img_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
@@ -747,8 +757,41 @@ static void create_swapchain(swapchain_creation_params* params) {
         } else {
             printf("VkImage depth %d creation failed with code %d!\n", i,
                    result);
+            assert(0);
         }
 
+        VkMemoryRequirements mem_reqs;
+        vkGetImageMemoryRequirements(dev, frames[i].depth_img, &mem_reqs);
+
+        // Allocate
+        int32_t memory_type =
+            find_memory_type(params->device->gpu, mem_reqs.memoryTypeBits,
+                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        assert(memory_type != -1);
+        VkMemoryAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = mem_reqs.size,
+            .memoryTypeIndex = memory_type,
+        };
+
+
+        result = vkAllocateMemory(dev, &alloc_info, params->allocator, &frames[i].depth_memory);
+        if (result == VK_SUCCESS) {
+            printf("VkImage depth %d memory allocated!\n", i);
+        } else {
+            printf("VkImage depth %d memory allocation failed with code %d!\n", i,
+                   result);
+            assert(0);
+        }
+        result = vkBindImageMemory(dev, frames[i].depth_img, frames[i].depth_memory, 0);
+
+        if (result == VK_SUCCESS) {
+            printf("VkImage depth %d memory bound!\n", i);
+        } else {
+            printf("VkImage depth %d memory binding failed with code %d!\n", i,
+                   result);
+            assert(0);
+        }
         VkImageViewCreateInfo depth_view_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = frames[i].depth_img,
@@ -772,6 +815,7 @@ static void create_swapchain(swapchain_creation_params* params) {
         } else {
             printf("VkImageView depth %d creation failed with code %d!\n", i,
                    result);
+            assert(0);
         }
 
         // Create framebuffer
@@ -795,6 +839,7 @@ static void create_swapchain(swapchain_creation_params* params) {
         } else {
             printf("VkFramebuffer %d creation failed with code %d!\n", i,
                    result);
+            assert(0);
         }
 
         if (result == VK_SUCCESS) {
@@ -802,6 +847,7 @@ static void create_swapchain(swapchain_creation_params* params) {
         } else {
             printf("VkCommandBuffer %d creation failed with code %d!\n", i,
                    result);
+            assert(0);
         }
 
         //  // Semaphores and fence
@@ -823,6 +869,7 @@ static void create_swapchain(swapchain_creation_params* params) {
                 "VkSemaphore image_available %d creation failed with code "
                 "%d!\n",
                 i, result);
+            assert(0);
         }
         result = vkCreateSemaphore(dev, &sem_info, params->allocator,
                                    &frames[i].render_finished);
@@ -833,6 +880,7 @@ static void create_swapchain(swapchain_creation_params* params) {
                 "VkSemaphore render_finished %d creation failed with code "
                 "%d!\n",
                 i, result);
+            assert(0);
         }
         result = vkCreateFence(dev, &fence_info, params->allocator,
                                &frames[i].inflight);
@@ -840,9 +888,10 @@ static void create_swapchain(swapchain_creation_params* params) {
             printf("VkFence %d created!\n", i);
         } else {
             printf("VkFence %d creation failed with code %d!\n", i, result);
+            assert(0);
         }
     }
-    free(imgs);
+    free(color_imgs);
 }
 
 static int32_t get_family_queue(VkPhysicalDevice dev, VkSurfaceKHR surface) {
@@ -871,6 +920,21 @@ static int32_t get_family_queue(VkPhysicalDevice dev, VkSurfaceKHR surface) {
     return family_idx;
 }
 
+int32_t find_memory_type(VkPhysicalDevice dev, uint32_t memory_type_bits,
+                         uint32_t memory_type) {
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(dev, &memProperties);
+
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((memory_type_bits & (1 << i)) &&
+            (memProperties.memoryTypes[i].propertyFlags & memory_type) ==
+                memory_type) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 //////////////////////////////////////////////////////////
 ////////// -------------   Debug messenger   -------------
 //////////////////////////////////////////////////////////
@@ -884,7 +948,7 @@ static VkBool32 debug_utils_callback(
            callback_data->messageIdNumber, callback_data->pMessage);
 
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        // ASSERT(0); // todo
+        assert(0);
     }
 
     return VK_FALSE;
@@ -930,6 +994,7 @@ void init_debug_msgr(VkInstance instance, VkAllocationCallbacks* allocator,
         printf("Debug messenger created!\n");
     } else {
         printf("Debug messenger creation failed with code %d!\n", result);
+        assert(0);
     }
 }
 

@@ -245,6 +245,13 @@ void get_window_size_wl(window_state* state, uint32_t* width,
     *height = backend->height;
 }
 
+void set_window_title_wl(window_state* state, const char* title) {
+    window_state_wl* backend = (window_state_wl*)state;
+    assert(backend);
+    xdg_toplevel_set_title(backend->toplevel, title);
+    xdg_toplevel_set_app_id(backend->toplevel, title);
+}
+
 void set_key_handler_wl(window_state* state, pfn_keyboard_key handler,
                         void* user) {
     window_state_wl* backend = (window_state_wl*)state;
@@ -314,6 +321,7 @@ void load_window_module_backend_wl(window_backend* backend) {
     backend->poll_events = poll_events_wl;
     backend->get_window_size = get_window_size_wl;
     backend->get_window_handle = get_window_handle_wl;
+    backend->set_window_title = set_window_title_wl;
     backend->set_key_handler = set_key_handler_wl;
     backend->set_pointer_button_handler = set_pointer_button_handler_wl;
     backend->set_pointer_motion_handler = set_pointer_motion_handler_wl;

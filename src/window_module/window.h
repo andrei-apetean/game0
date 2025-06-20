@@ -138,6 +138,7 @@ void     window_destroy();
 uint32_t window_get_backend_id();
 int32_t  window_create(window_params* params);
 
+void window_set_title(const char* title);
 void  window_set_key_handler(pfn_keyboard_key on_key, void* user_data);
 void  window_set_button_handler(pfn_pointer_button on_button, void* user_data);
 void  window_set_motion_handler(pfn_pointer_motion on_motion, void* user_data);

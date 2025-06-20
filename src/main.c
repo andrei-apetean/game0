@@ -4,6 +4,7 @@
 
 #include "mathf.h"
 #include "render_module/render.h"
+#include "time_util.h"
 #include "window_module/window.h"
 
 static uint32_t is_running;
@@ -14,13 +15,13 @@ static int32_t  camera_fov = 80;
 
 static vertex cube_vertices[] = {
     {-1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 0.0f},  // 0
-    {1.0f, -1.0f, -1.0f, 0.0f, 1.0f, 0.0f},   // 1
-    {1.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f},    // 2
-    {-1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 0.0f},   // 3
-    {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f},   // 4
-    {1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f},    // 5
-    {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},     // 6
-    {-1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f},    // 7
+    {1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f},   // 1
+    {1.0f, 1.0f, -1.0f,   0.0f, 0.0f, 1.0f},    // 2
+    {-1.0f, 1.0f, -1.0f,  1.0f, 1.0f, 0.0f},   // 3
+    {-1.0f, -1.0f, 1.0f,  1.0f, 0.0f, 1.0f},   // 4
+    {1.0f, -1.0f, 1.0f,   0.0f, 1.0f, 1.0f},    // 5
+    {1.0f, 1.0f, 1.0f,    1.0f, 1.0f, 1.0f},     // 6
+    {-1.0f, 1.0f, 1.0f,   0.0f, 0.0f, 0.0f},    // 7
 };
 
 uint32_t cube_indices[] = {
@@ -75,6 +76,8 @@ void on_window_resize(int32_t w, int32_t h, void* user) {
     camera = m4_perspective(deg2rad(camera_fov), aspect, 0.1f, 1000.0f);
 }
 
+static uint32_t fps_frame_count;
+
 int main() {
     srand((unsigned int)time(NULL));
     window_initialize();
@@ -122,8 +125,10 @@ int main() {
     camera = m4_perspective(deg2rad(camera_fov),
                             (float)wparams.width / (float)wparams.height, 0.1f,
                             1000.0f);
+    time_init();
     init_cube_positions();
     printf("Cubes initialized!\n");
+    time_p last_time;
     while (is_running) {
         if (needs_resize) {
             needs_resize = 0;
@@ -138,6 +143,18 @@ int main() {
             render_draw(&cube, mvp);
         }
         render_end();
+
+        time_p now = time_now();
+        fps_frame_count++;
+
+        double elapsed = time_diff_sec(last_time, now);
+        if (elapsed >= 1.0) {
+            char title[128] = {0};
+            sprintf(title, "game_0 - %d fps", fps_frame_count);
+            window_set_title(title);
+            fps_frame_count = 0;
+            last_time = now;
+        }
     }
 
     render_terminate();
@@ -148,6 +165,7 @@ int main() {
 }
 
 // todo; temp
+#include "time_posix.c"
 #include "mathf.c"
 #include "memory.c"
 #include "render_module/render.c"

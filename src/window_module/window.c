@@ -58,6 +58,11 @@ void window_destroy() {
     module.backend.destroy_window(module.state);
 }
 
+void window_set_title(const char* title) {
+    assert(module.is_intialized);
+    module.backend.set_window_title(module.state, title);
+}
+
 void window_set_key_handler(pfn_keyboard_key on_key, void* user_data) {
     assert(module.is_intialized);
     module.backend.set_key_handler(module.state, on_key, user_data);

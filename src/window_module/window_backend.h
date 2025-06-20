@@ -41,6 +41,7 @@ typedef struct {
     void (*poll_events)(window_state*);
     void (*teardown)(window_state*);
     void (*get_window_size)(window_state*, uint32_t*, uint32_t*);
+    void (*set_window_title)(window_state*, const char*);
     void (*set_key_handler)(window_state*, pfn_keyboard_key, void*);
     void (*set_pointer_button_handler)(window_state*, pfn_pointer_button,
                                        void*);

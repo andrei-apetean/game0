@@ -56,12 +56,13 @@ void render_initialize(render_params* params) {
     init_logical_device_vk(&creation_params);
 
     VkFormat           depth_format = choose_depth_format(state.device.gpu);
+    assert(state.swapchain.depth_format != VK_FORMAT_MAX_ENUM);
     VkSurfaceFormatKHR surface_format =
         choose_surface_fmt(state.device.gpu, state.surface);
     VkPresentModeKHR present_mode =
         choose_present_mode(state.device.gpu, state.surface);
     init_renderpass_vk(state.device.handle, state.allocator, &state.renderpass,
-                       surface_format.format);
+                       surface_format.format, depth_format);
 
     VkCommandPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -73,7 +74,6 @@ void render_initialize(render_params* params) {
     state.swapchain.format = surface_format;
     state.swapchain.present_mode = present_mode;
     state.swapchain.depth_format = depth_format;
-    assert(state.swapchain.depth_format != VK_FORMAT_MAX_ENUM);
 
     swapchain_creation_params swapchain_params = {
         .swapchain = &state.swapchain,
@@ -115,6 +115,7 @@ void render_initialize(render_params* params) {
         printf("VkPipelineLayout created!\n");
     } else {
         printf("VkPipelineLayout creation failed with code %d!\n", result);
+        assert(0);
     }
 
     VkShaderModule vert = load_shader_module(
@@ -173,27 +174,31 @@ void render_terminate() {
 
 void render_begin() {
     vkWaitForFences(state.device.handle, 1,
-                    &state.swapchain.frames[state.current_frame].inflight, 0,
-                    UINT64_MAX);
+                    &state.swapchain.frames[state.current_frame].inflight,
+                    VK_TRUE, UINT64_MAX);
     vkResetFences(state.device.handle, 1,
                   &state.swapchain.frames[state.current_frame].inflight);
-    uint32_t image_index;
 
-    // Acquire next image, signal render_started semaphore when ready
+    uint32_t image_index;
     VkResult result = vkAcquireNextImageKHR(
         state.device.handle, state.swapchain.handle, UINT64_MAX,
         state.swapchain.frames[state.current_frame].image_available,
         VK_NULL_HANDLE, &image_index);
-    if (result != VK_SUCCESS) {
-        // Handle swapchain recreation or errors here
 
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        printf("Swapchain needs recreation!\n");
+        // Recreate swapchain here
+        return;
+    } else if (result != VK_SUCCESS) {
+        printf("Image acquisition error!\n");
+        // Handle other errors
         return;
     }
+
     state.image_index = image_index;
 
     VkCommandBuffer cmd = state.cmdbuffers[state.current_frame];
 
-    // Reset and begin command buffer recording
     vkResetCommandBuffer(cmd, 0);
 
     VkCommandBufferBeginInfo begin_info = {
@@ -205,7 +210,6 @@ void render_begin() {
     VkClearValue clear_values[2];
     clear_values[0].color =
         (VkClearColorValue){{0.0941f, 0.0941f, 0.0941f, 1.0f}};
-    // clear depth to 1.0 (far), stencil to 0
     clear_values[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
 
     VkRenderPassBeginInfo rp_info = {
@@ -217,11 +221,11 @@ void render_begin() {
                 .offset = {0, 0},
                 .extent = {state.width, state.height},
             },
-        .clearValueCount = sizeof(clear_values) / sizeof(clear_values[0]),
+        .clearValueCount = 2,
         .pClearValues = clear_values,
     };
-
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
 }
 
 void render_end() {
@@ -231,7 +235,6 @@ void render_end() {
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
 
-    // Wait for the acquire semaphore to be signaled before starting rendering
     VkSemaphore wait_semaphores[] = {
         state.swapchain.frames[state.current_frame].image_available,
     };
@@ -239,7 +242,6 @@ void render_end() {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     };
 
-    // Signal this semaphore when rendering is finished
     VkSemaphore signal_semaphores[] = {
         state.swapchain.frames[state.current_frame].render_finished,
     };
@@ -261,7 +263,7 @@ void render_end() {
     VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = signal_semaphores,  // wait on render_finished
+        .pWaitSemaphores = signal_semaphores,
         .swapchainCount = 1,
         .pSwapchains = &state.swapchain.handle,
         .pImageIndices = &image_index,
@@ -269,7 +271,6 @@ void render_end() {
 
     vkQueuePresentKHR(state.device.gfx_queue, &present_info);
 
-    // Advance current frame for next loop iteration
     state.current_frame =
         (state.current_frame + 1) % state.swapchain.frame_count;
 }
