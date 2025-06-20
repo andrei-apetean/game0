@@ -15,13 +15,13 @@ static int32_t  camera_fov = 80;
 
 static vertex cube_vertices[] = {
     {-1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 0.0f},  // 0
-    {1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f},   // 1
-    {1.0f, 1.0f, -1.0f,   0.0f, 0.0f, 1.0f},    // 2
-    {-1.0f, 1.0f, -1.0f,  1.0f, 1.0f, 0.0f},   // 3
-    {-1.0f, -1.0f, 1.0f,  1.0f, 0.0f, 1.0f},   // 4
-    {1.0f, -1.0f, 1.0f,   0.0f, 1.0f, 1.0f},    // 5
-    {1.0f, 1.0f, 1.0f,    1.0f, 1.0f, 1.0f},     // 6
-    {-1.0f, 1.0f, 1.0f,   0.0f, 0.0f, 0.0f},    // 7
+    {1.0f, -1.0f, -1.0f, 0.0f, 1.0f, 0.0f},   // 1
+    {1.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f},    // 2
+    {-1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 0.0f},   // 3
+    {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f},   // 4
+    {1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f},    // 5
+    {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},     // 6
+    {-1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f},    // 7
 };
 
 uint32_t cube_indices[] = {
@@ -38,7 +38,8 @@ static mat4 camera;
 #define NUM_CUBES 32
 #define MIN_CUBE_POS -25.0f
 #define MAX_CUBE_POS 25.0f
-vec3 cube_positions[NUM_CUBES];
+vec3  cube_positions[NUM_CUBES];
+float cube_angles[NUM_CUBES];
 
 float rand_float_range(float min, float max) {
     return min + ((float)rand() / (float)RAND_MAX) * (max - min);
@@ -49,8 +50,7 @@ void init_cube_positions() {
         cube_positions[i].x = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
         cube_positions[i].y = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
         cube_positions[i].z = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
-        printf(" %f, %f, %f\n", cube_positions[i].x, cube_positions[i].y,
-               cube_positions[i].z);
+        cube_angles[i] = rand_float_range(0, 360);
     }
 }
 
@@ -129,6 +129,9 @@ int main() {
     init_cube_positions();
     printf("Cubes initialized!\n");
     time_p last_time;
+    time_p last_frame;
+    double delta_time;
+    double elapsed;
     while (is_running) {
         if (needs_resize) {
             needs_resize = 0;
@@ -137,8 +140,8 @@ int main() {
         render_begin();
         double time = get_time_seconds();
         for (int i = 0; i < NUM_CUBES; i++) {
-            float angle = time * 20.0f + i * 10.0f;
-            mat4  model = create_model_matrix(cube_positions[i], angle);
+            cube_angles[i] += delta_time * 10;
+            mat4  model = create_model_matrix(cube_positions[i], cube_angles[i]);
             mat4  mvp = m4_mul(camera, m4_mul(view, model));
             render_draw(&cube, mvp);
         }
@@ -147,7 +150,9 @@ int main() {
         time_p now = time_now();
         fps_frame_count++;
 
-        double elapsed = time_diff_sec(last_time, now);
+        elapsed = time_diff_sec(last_time, now);
+        delta_time = time_diff_sec(last_frame, now);
+        last_frame = now;
         if (elapsed >= 1.0) {
             char title[128] = {0};
             sprintf(title, "game_0 - %d fps", fps_frame_count);
@@ -165,9 +170,9 @@ int main() {
 }
 
 // todo; temp
-#include "time_posix.c"
 #include "mathf.c"
 #include "memory.c"
 #include "render_module/render.c"
+#include "time_posix.c"
 #include "window_module/window.c"
 #include "window_module/window_backend_wl.c"
