@@ -5,6 +5,7 @@
 
 #include "mathf.h"
 #include "render_module/render.h"
+#include "render_module/render_types.h"
 #include "time_util.h"
 #include "window_module/window.h"
 
@@ -36,11 +37,11 @@ uint32_t cube_indices[] = {
 
 static mat4 camera;
 
-#define NUM_CUBES 32
-#define MIN_CUBE_POS -25.0f
-#define MAX_CUBE_POS 25.0f
+#define NUM_CUBES 64
+#define MIN_CUBE_POS -30.0f
+#define MAX_CUBE_POS 30.0f
 vec3  cube_positions[NUM_CUBES];
-float cube_angles[NUM_CUBES];
+vec3 cube_rotations[NUM_CUBES];
 
 float rand_float_range(float min, float max) {
     return min + ((float)rand() / (float)RAND_MAX) * (max - min);
@@ -51,13 +52,21 @@ void init_cube_positions() {
         cube_positions[i].x = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
         cube_positions[i].y = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
         cube_positions[i].z = rand_float_range(MIN_CUBE_POS, MAX_CUBE_POS);
-        cube_angles[i] = rand_float_range(0, 360);
+        cube_rotations[i].x = rand_float_range(0, 360);
+        cube_rotations[i].y = rand_float_range(0, 360);
+        cube_rotations[i].z = rand_float_range(0, 360);
     }
 }
 
-mat4 create_model_matrix(vec3 position, float rotation_degrees) {
+mat4 create_model_matrix(vec3 position, vec3 rotation_degrees) {
     mat4 model = m4_translation(position);
-    return m4_mul(model, m4_rotation_y(deg2rad(rotation_degrees)));
+
+    mat4 rot_x = m4_rotation_x(deg2rad(rotation_degrees.x));
+    mat4 rot_y = m4_rotation_y(deg2rad(rotation_degrees.y));
+    mat4 rot_z = m4_rotation_z(deg2rad(rotation_degrees.z));
+
+   mat4 rotation = m4_mul(rot_y, m4_mul(rot_x, rot_z));
+    return m4_mul(model, rotation);
 }
 
 int32_t make_pipeline_config(render_pipeline_config* out_config) {
@@ -126,7 +135,7 @@ int main() {
     int32_t  err = render_device_connect(window_api, window);
     if (err) return -1;
 
-    err = render_device_create_swapchain(wparams.width, wparams.width);
+    err = render_device_create_swapchain(wparams.width, wparams.height);
 
     if (err) return -1;
     render_pipeline_config pipeline_config;
@@ -145,13 +154,26 @@ int main() {
         .vertex_count = sizeof(cube_vertices) / sizeof(cube_vertices[0]),
         .indices = cube_indices,
         .index_count = sizeof(cube_indices) / sizeof(cube_indices[0]),
-
     };
 
-    printf("Cube vertex count: %d\n", cube.vertex_count);
-    printf("Cube index count: %d\n", cube.index_count);
+    buffer_config buffer_config = {
+        .usage_flags = index_buffer_bit | transfer_dst_bit,
+        .data = cube_indices,
+        .size = sizeof(uint32_t) * cube.index_count,
+    }; 
 
-    // render_create_mesh_buffers(&cube);
+    buffer_id cube_index_buffer = render_device_create_buffer(&buffer_config);
+    if (cube_index_buffer == RENDER_INVALID_ID) return -1;
+
+    buffer_config.data = cube.vertices;
+    buffer_config.size = sizeof(vertex) * cube.vertex_count;
+    buffer_config.usage_flags = 0;
+    buffer_config.usage_flags = vertex_buffer_bit | transfer_dst_bit;
+
+    buffer_id cube_vertex_buffer = render_device_create_buffer(&buffer_config);
+    if (cube_vertex_buffer == RENDER_INVALID_ID) return -1;
+    cube.vertex_buffer = cube_vertex_buffer;
+    cube.index_buffer = cube_index_buffer;
     is_running = 1;
 
     vec3 cam_pos = {0.0f, 0.0f, -20.0f};  // moved farther back
@@ -176,15 +198,16 @@ int main() {
         }
         window_poll_events();
 
-        render_swapchain_acquire_next_image();
-        // for (int i = 0; i < NUM_CUBES; i++) {
-        //     cube_angles[i] += delta_time * 10;
-        //     mat4 model = create_model_matrix(cube_positions[i], cube_angles[i]);
-        //     mat4 mvp = m4_mul(camera, m4_mul(view, model));
-        //     render_draw(&cube, mvp);
-        // }
-        // render_end();
-        render_swapchain_present();
+        render_device_begin_frame();
+        for (int i = 0; i < NUM_CUBES; i++) {
+            cube_rotations[i].x += delta_time * 10;
+            cube_rotations[i].y += delta_time * 10;
+            cube_rotations[i].z += delta_time * 10;
+            mat4 model = create_model_matrix(cube_positions[i], cube_rotations[i]);
+            mat4 mvp = m4_mul(camera, m4_mul(view, model));
+            render_device_draw_mesh(&cube, mvp);
+        }
+        render_device_end_frame();
 
         time_p now = time_now();
         fps_frame_count++;
@@ -200,6 +223,8 @@ int main() {
             last_time = now;
         }
     }
+    render_device_destroy_buffer(cube_index_buffer);
+    render_device_destroy_buffer(cube_vertex_buffer);
     render_device_destroy_render_pipeline();
     render_device_destroy_swapchain();
     render_device_disconnect();

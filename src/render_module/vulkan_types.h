@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <vulkan/vulkan.h>
+#include "render_module/render_types.h"
 
 #define VK_CHECK(x)                \
     {                              \
@@ -10,7 +11,19 @@
     }
 
 #define CLAMP_VK(x, min, max) (x < min ? min : x > max ? max : x)
+
 #define MAX_FRAME_COUNT 3
+
+// todo
+#define MAX_BUFFERS 32
+
+typedef struct {
+    buffer_id id;
+    VkBuffer handle;
+    VkDeviceMemory memory;
+    VkDeviceSize size;
+} vulkan_buffer;
+
 typedef struct {
     VkSurfaceKHR     surface;
     VkShaderModule   vertex_shader;
@@ -73,6 +86,9 @@ typedef struct {
     VkFence         inflight_fences[MAX_FRAME_COUNT];
     VkCommandBuffer cmdbuffers[MAX_FRAME_COUNT];
     vulkan_pipeline pipeline;
+
+    vulkan_buffer index_buffer;
+    vulkan_buffer vertex_buffer;
 
     uint32_t current_frame;
     uint32_t image_index;

@@ -22,9 +22,19 @@ int32_t vulkan_device_find_memory_type(vulkan_device* device,
                                        uint32_t       memory_type_bits,
                                        uint32_t       memory_type);
 
+int32_t vulkan_device_create_buffer(vulkan_device* device, vulkan_buffer* buffer,
+                                    buffer_config* config);
+
+int32_t vulkan_device_upload_buffer(vulkan_device* device,
+                                    vulkan_buffer* dst_buffer, void* data,
+                                    uint32_t size);
+
+void vulkan_device_destroy_buffer(vulkan_device* device, vulkan_buffer* buffer);
+
 int32_t vulkan_device_create_shader_module(vulkan_device* device, uint32_t* code,
                                            size_t          code_size,
                                            VkShaderModule* module);
 
 void vulkan_device_destroy_shader_module(vulkan_device* device,
                                          VkShaderModule module);
+

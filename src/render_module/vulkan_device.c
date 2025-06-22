@@ -2,7 +2,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vulkan/vulkan_core.h>
+#include "render_module/vulkan_types.h"
 
 typedef struct {
     VkPhysicalDevice           gpu;
@@ -158,6 +160,143 @@ int32_t vulkan_device_find_memory_type(vulkan_device* device,
         }
     }
     return -1;
+}
+
+int32_t vulkan_device_create_buffer(vulkan_device* device, vulkan_buffer* buffer,
+                                    buffer_config* config) {
+
+    VkBufferUsageFlags usage = 0;
+    if (config->usage_flags & transfer_src_bit)   usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    if (config->usage_flags & transfer_dst_bit)   usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (config->usage_flags & uniform_buffer_bit) usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if (config->usage_flags & storage_buffer_bit) usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if (config->usage_flags & index_buffer_bit)   usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if (config->usage_flags & vertex_buffer_bit)  usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+    VkBufferCreateInfo buffer_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = config->size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    buffer->id = -1;
+    VK_CHECK(vkCreateBuffer(device->logical_device, &buffer_info,
+                                     device->allocator, &buffer->handle));
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device->logical_device, buffer->handle,
+                                  &mem_reqs);
+
+    VkPhysicalDeviceMemoryProperties mem_properties;
+    vkGetPhysicalDeviceMemoryProperties(device->physical_device, &mem_properties);
+    uint32_t memory_type_idx = vulkan_device_find_memory_type(
+        device, mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (memory_type_idx < 0 ) {
+        return -1;
+    }
+    VkMemoryAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_reqs.size,
+        .memoryTypeIndex = memory_type_idx,
+    };
+
+    VK_CHECK(vkAllocateMemory(device->logical_device, &alloc_info, device->allocator,
+                              &buffer->memory));
+    vkBindBufferMemory(device->logical_device, buffer->handle, buffer->memory, 0);
+    static uint32_t id = 0;
+    buffer->id = id++;
+    buffer->size= mem_reqs.size;
+    vulkan_device_upload_buffer(device, buffer, config->data, config->size);
+    return 0;
+}
+
+void vulkan_device_destroy_buffer(vulkan_device* device, vulkan_buffer* buffer) {
+    vkDestroyBuffer(device->logical_device, buffer->handle, device->allocator);
+    vkFreeMemory(device->logical_device, buffer->memory, device->allocator);
+
+    buffer->handle = VK_NULL_HANDLE;
+    buffer->memory = VK_NULL_HANDLE;
+    buffer->size = 0;
+    buffer->id = RENDER_INVALID_ID;
+}
+
+int32_t vulkan_device_upload_buffer(vulkan_device* device, vulkan_buffer* dst_buffer, void* data, uint32_t size) {
+    if (!device || !dst_buffer || !data || size == 0) return -1;
+
+    // 1. Create staging buffer
+    VkBufferCreateInfo staging_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    };
+
+    VkMemoryAllocateInfo alloc_info = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    VkMemoryRequirements mem_reqs;
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_memory;
+
+    vkCreateBuffer(device->logical_device, &staging_info, device->allocator, &staging_buffer);
+    vkGetBufferMemoryRequirements(device->logical_device, staging_buffer, &mem_reqs);
+
+    uint32_t memory_type_index = vulkan_device_find_memory_type(
+        device, mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = memory_type_index;
+
+    vkAllocateMemory(device->logical_device, &alloc_info, device->allocator, &staging_memory);
+    vkBindBufferMemory(device->logical_device, staging_buffer, staging_memory, 0);
+
+    // 2. Copy data
+    void* mapped = NULL;
+    vkMapMemory(device->logical_device, staging_memory, 0, size, 0, &mapped);
+    memcpy(mapped, data, size);
+    vkUnmapMemory(device->logical_device, staging_memory);
+
+    // 3. Record copy command
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = device->cmdpool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device->logical_device, &cmd_alloc_info, &cmd);
+
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    vkBeginCommandBuffer(cmd, &begin_info);
+
+    VkBufferCopy copy_region = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = size,
+    };
+    vkCmdCopyBuffer(cmd, staging_buffer, dst_buffer->handle, 1, &copy_region);
+
+    vkEndCommandBuffer(cmd);
+
+    // 4. Submit and wait
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+    };
+    vkQueueSubmit(device->graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(device->graphics_queue);
+
+    // 5. Cleanup
+    vkFreeCommandBuffers(device->logical_device, device->cmdpool, 1, &cmd);
+    vkDestroyBuffer(device->logical_device, staging_buffer, device->allocator);
+    vkFreeMemory(device->logical_device, staging_memory, device->allocator);
+
+    return 0;
 }
 
 int32_t vulkan_device_create_shader_module(vulkan_device* device, uint32_t* code,

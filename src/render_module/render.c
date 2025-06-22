@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <vulkan/vulkan_core.h>
 
+#include "render_module/render_types.h"
 #include "render_module/vkcore.h"
 #include "render_module/vulkan_device.h"
 #include "render_module/vulkan_pipeline.h"
@@ -80,9 +81,9 @@ int32_t render_device_create_swapchain(uint32_t width, uint32_t height) {
 int32_t render_device_resize_swapchain(uint32_t width, uint32_t height) {
     render_device_destroy_swapchain();
 
-    int32_t err = vkcore_create_framebuffers(&core, core.pipeline.renderpass,
-                               core.swapchain.frame_count, core.swapchain.width,
-                               core.swapchain.height);
+    int32_t err = vkcore_create_framebuffers(
+        &core, core.pipeline.renderpass, core.swapchain.frame_count,
+        core.swapchain.width, core.swapchain.height);
     if (err) return err;
     return render_device_create_swapchain(width, height);
 }
@@ -95,7 +96,7 @@ void render_device_destroy_swapchain() {
     vulkan_swapchain_destroy(&core.device, &core.swapchain);
 }
 
-int32_t render_swapchain_acquire_next_image() {
+void render_device_begin_frame() {
     vkWaitForFences(core.device.logical_device, 1,
                     &core.inflight_fences[core.current_frame], VK_TRUE, UINT64_MAX);
     vkResetFences(core.device.logical_device, 1,
@@ -108,11 +109,11 @@ int32_t render_swapchain_acquire_next_image() {
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         printf("Swapchain needs recreation!\n");
         // Recreate swapchain here
-        return -1;
+        return;
     } else if (result != VK_SUCCESS) {
         printf("Image acquisition error!\n");
         // Handle other errors
-        return -1;
+        return;
     }
 
     VkCommandBufferBeginInfo begin_info = {
@@ -124,7 +125,7 @@ int32_t render_swapchain_acquire_next_image() {
 
     vkResetCommandBuffer(cmd, 0);
     vkBeginCommandBuffer(cmd, &begin_info);
-
+    // todo, take out
     VkClearValue clear_values[2];
     clear_values[0].color = (VkClearColorValue){{0.0941f, 0.0941f, 0.0941f, 1.0f}};
     clear_values[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
@@ -143,12 +144,32 @@ int32_t render_swapchain_acquire_next_image() {
     };
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, core.pipeline.handle);
-    return 0;
+
+    VkViewport viewport = {
+        .x = 0,
+        .y = 0,
+        .width = (float)core.swapchain.width,
+        .height = (float)core.swapchain.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent =
+            {
+                core.swapchain.width,
+                core.swapchain.height,
+            },
+    };
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
-void render_swapchain_present() {
-    VkCommandBuffer cmd = core.cmdbuffers[core.current_frame];
-
+void render_device_end_frame() {
+    VkCommandBuffer  cmd = core.cmdbuffers[core.current_frame];
+    VkDescriptorType type;
+    // todo, takeout
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
 
@@ -237,14 +258,70 @@ int32_t render_device_create_render_pipeline(render_pipeline_config* config) {
     if (err) return err;
     // todo: hack
     err = vkcore_create_framebuffers(&core, core.pipeline.renderpass,
-                               core.swapchain.frame_count, core.swapchain.width,
-                               core.swapchain.height);
+                                     core.swapchain.frame_count,
+                                     core.swapchain.width, core.swapchain.height);
     return err;
 }
 
 void render_device_destroy_render_pipeline() {
     vkDeviceWaitIdle(core.device.logical_device);
     vulkan_pipeline_destroy(&core.device, &core.pipeline);
+}
+
+buffer_id render_device_create_buffer(buffer_config* config) {
+    vulkan_buffer* buffer = 0;
+    if ((config->usage_flags & vertex_buffer_bit) == vertex_buffer_bit ) {
+        buffer = &core.vertex_buffer;
+        printf("Creating vertex buffer %d\n", config->usage_flags & vertex_buffer_bit);
+    }
+    if ((config->usage_flags & index_buffer_bit) == index_buffer_bit) {
+        buffer = &core.index_buffer;
+        printf("Creating index buffer %d\n", config->usage_flags & index_buffer_bit);
+    }
+    if (!buffer){
+        return RENDER_INVALID_ID;
+    }
+
+    printf("Creating buffer %d, %d\n", config->size, config->usage_flags);
+    if (!buffer) return RENDER_INVALID_ID;
+
+    int32_t result = vulkan_device_create_buffer(&core.device, buffer, config);
+    if (result) return RENDER_INVALID_ID;
+
+    return buffer->id;
+}
+
+void render_device_destroy_buffer(buffer_id buffer_id) {
+    vkDeviceWaitIdle(core.device.logical_device);
+    vulkan_buffer* buffer = 0;
+    if (core.vertex_buffer.id == buffer_id) {
+        buffer = &core.vertex_buffer;
+    } else if (core.index_buffer.id == buffer_id) {
+        buffer = &core.index_buffer;
+    }
+    if (!buffer) return;
+
+    printf("Destroying buffer: %d, %zu\n", buffer_id, buffer->size);
+    vulkan_device_destroy_buffer(&core.device, buffer);
+}
+
+void render_device_draw_mesh(static_mesh* mesh, mat4 mvp) {
+    if (mesh->index_buffer == RENDER_INVALID_ID ||
+        mesh->vertex_buffer == RENDER_INVALID_ID) {
+        return;
+    }
+
+    VkCommandBuffer cmd = core.cmdbuffers[core.current_frame];
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, &core.vertex_buffer.handle, offsets);
+    vkCmdBindIndexBuffer(cmd, core.index_buffer.handle, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, core.pipeline.handle);
+
+    vkCmdPushConstants(cmd, core.pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(mat4), &mvp);
+
+    vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
 }
 
 /*
