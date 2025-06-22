@@ -5,4 +5,4 @@ ReferenceAlignment: Left
 AlignConsecutiveDeclarations: true
 IndentWidth: 4
 UseTab: Never
-ColumnLimit: 80
+ColumnLimit: 84

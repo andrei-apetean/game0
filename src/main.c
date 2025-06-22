@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -59,6 +60,38 @@ mat4 create_model_matrix(vec3 position, float rotation_degrees) {
     return m4_mul(model, m4_rotation_y(deg2rad(rotation_degrees)));
 }
 
+int32_t make_pipeline_config(render_pipeline_config* out_config) {
+    FILE* vertex_file = fopen("./bin/assets/shaders/shader.vert.spv", "rb");
+    assert(vertex_file);
+
+    fseek(vertex_file, 0, SEEK_END);
+    size_t vertex_code_size = ftell(vertex_file);
+    rewind(vertex_file);
+
+    uint32_t* vertex_code = malloc(vertex_code_size);
+    assert(vertex_code);
+    fread(vertex_code, 1, vertex_code_size, vertex_file);
+    fclose(vertex_file);
+
+    FILE* fragment_file = fopen("./bin/assets/shaders/shader.frag.spv", "rb");
+    assert(fragment_file);
+
+    fseek(fragment_file, 0, SEEK_END);
+    size_t fragment_code_size = ftell(fragment_file);
+    rewind(fragment_file);
+
+    uint32_t* fragment_code = malloc(fragment_code_size);
+    assert(fragment_code);
+    fread(fragment_code, 1, fragment_code_size, fragment_file);
+    
+    fclose(fragment_file);
+    out_config->fragment_shader_code_size = fragment_code_size;
+    out_config->fragment_shader_code = fragment_code;
+    out_config->vertex_shader_code_size = vertex_code_size;
+    out_config->vertex_shader_code = vertex_code;
+    return 0;
+}
+
 void on_window_close(void* user) { is_running = 0; }
 
 void on_window_resize(int32_t w, int32_t h, void* user) {
@@ -84,18 +117,29 @@ int main() {
     };
 
     if (window_create(&wparams) != 0) return -1;
-    
 
     window_set_close_handler(on_window_close, NULL);
     window_set_size_handler(on_window_resize, NULL);
 
-    render_params rparams = {
-        .swapchain_width = wparams.width,
-        .swapchain_height = wparams.height,
-        .window_api = window_get_backend_id(),
-        .window_handle = window_get_native_handle(),
-    };
-    render_initialize(&rparams);
+    uint32_t window_api = window_get_backend_id();
+    void*    window = window_get_native_handle();
+    int32_t  err = render_device_connect(window_api, window);
+    if (err) return -1;
+
+    err = render_device_create_swapchain(wparams.width, wparams.width);
+
+    if (err) return -1;
+    render_pipeline_config pipeline_config;
+    err = make_pipeline_config(&pipeline_config);
+    if (err) return -1;
+
+    err = render_device_create_render_pipeline(&pipeline_config);
+    if (err == 0) {
+        free(pipeline_config.fragment_shader_code);
+        free(pipeline_config.vertex_shader_code);
+    } else {
+        return -1;
+    }
     static_mesh cube = {
         .vertices = cube_vertices,
         .vertex_count = sizeof(cube_vertices) / sizeof(cube_vertices[0]),
@@ -107,7 +151,7 @@ int main() {
     printf("Cube vertex count: %d\n", cube.vertex_count);
     printf("Cube index count: %d\n", cube.index_count);
 
-    render_create_mesh_buffers(&cube);
+    // render_create_mesh_buffers(&cube);
     is_running = 1;
 
     vec3 cam_pos = {0.0f, 0.0f, -20.0f};  // moved farther back
@@ -116,9 +160,9 @@ int main() {
 
     mat4 view = m4_look_at(cam_pos, target, up);
 
-    camera = m4_perspective(deg2rad(camera_fov),
-                            (float)wparams.width / (float)wparams.height, 0.1f,
-                            1000.0f);
+    camera =
+        m4_perspective(deg2rad(camera_fov),
+                       (float)wparams.width / (float)wparams.height, 0.1f, 1000.0f);
     time_init();
     init_cube_positions();
     printf("Cubes initialized!\n");
@@ -131,14 +175,16 @@ int main() {
             needs_resize = 0;
         }
         window_poll_events();
-        render_begin();
-        for (int i = 0; i < NUM_CUBES; i++) {
-            cube_angles[i] += delta_time * 10;
-            mat4 model = create_model_matrix(cube_positions[i], cube_angles[i]);
-            mat4 mvp = m4_mul(camera, m4_mul(view, model));
-            render_draw(&cube, mvp);
-        }
-        render_end();
+
+        render_swapchain_acquire_next_image();
+        // for (int i = 0; i < NUM_CUBES; i++) {
+        //     cube_angles[i] += delta_time * 10;
+        //     mat4 model = create_model_matrix(cube_positions[i], cube_angles[i]);
+        //     mat4 mvp = m4_mul(camera, m4_mul(view, model));
+        //     render_draw(&cube, mvp);
+        // }
+        // render_end();
+        render_swapchain_present();
 
         time_p now = time_now();
         fps_frame_count++;
@@ -154,8 +200,9 @@ int main() {
             last_time = now;
         }
     }
-
-    render_terminate();
+    render_device_destroy_render_pipeline();
+    render_device_destroy_swapchain();
+    render_device_disconnect();
     window_destroy();
     window_terminate();
     printf("Goodbye!\n");
@@ -166,6 +213,11 @@ int main() {
 #include "mathf.c"
 #include "memory.c"
 #include "render_module/render.c"
+#include "render_module/vkcore.c"
+#include "render_module/vkcore_wl.c"
+#include "render_module/vulkan_device.c"
+#include "render_module/vulkan_swapchain.c"
+#include "render_module/vulkan_pipeline.c"
 #include "time_posix.c"
 #include "window_module/window.c"
 #include "window_module/window_backend_wl.c"
