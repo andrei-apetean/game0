@@ -1,4 +1,6 @@
 -I./external
--I./include
 -I./src
+-Wall
+-Wextra
+-Werror
 -D_DEBUG

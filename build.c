@@ -114,7 +114,7 @@ int game_build() {
     snprintf(lib, MAX_PATH, "-L%s/Lib", vk_sdk);
 
     const char* cmd[] = {
-        "gcc", "-g", "-o", "./bin/game0", "./src/main.c", "./external/xdg-shell.c",
+        "gcc", "-g", "-o", "./bin/game0", "./src/main.c", "./external/wayland/xdg-shell.c",
         "-D_DEBUG",
         "-I./include", "-I./src", "-I./external", include, lib,
         "-lvulkan", "-lm",

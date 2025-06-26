@@ -1,30 +1,43 @@
 #pragma once
 
-#include <stdint.h>
-
-#include "render_module/render_types.h"
+#include "base.h"
 #include "math_types.h"
+#include "render_module/render_types.h"
 
-typedef struct {
-    uint32_t* vertex_shader_code;
-    uint32_t  vertex_shader_code_size;
-    uint32_t* fragment_shader_code;
-    uint32_t  fragment_shader_code_size;
-} render_pipeline_config;
+typedef u32 rbuf_id;
+typedef u32 rpass_id;
+typedef u32 rpipe_id;
 
-int32_t render_device_connect(uint32_t window_api, void* window);
-void    render_device_disconnect();
-int32_t render_device_create_swapchain(uint32_t width, uint32_t height);
-int32_t render_device_resize_swapchain(uint32_t width, uint32_t height);
-void    render_device_destroy_swapchain();
+typedef struct rcmd rcmd;
 
-void render_device_begin_frame();
-void render_device_end_frame();
+void rcmd_begin_pass(rcmd* cmd, rpass_id id);
+void rcmd_begin_pipe(rcmd* cmd, rpipe_id id);
+void rcmd_begin_vertex_buf(rcmd* cmd, rbuf_id id);
+void rcmd_begin_index_buf(rcmd* cmd, rbuf_id id);
+void rcmd_begin_descriptor_set(rcmd* cmd, rbuf_id id);
 
-buffer_id render_device_create_buffer(buffer_config* config);
-void      render_device_destroy_buffer(buffer_id buffer);
-// todo: temp
-void render_device_draw_mesh(static_mesh* mesh, mat4 mvp);
+void rcmd_end_pass(rcmd* cmd, rpass_id id);
+void rcmd_end_pipe(rcmd* cmd, rpipe_id id);
+void rcmd_end_vertex_buf(rcmd* cmd, rbuf_id id);
+void rcmd_end_index_buf(rcmd* cmd, rbuf_id id);
+void rcmd_end_descriptor_set(rcmd* cmd, rbuf_id id);
 
-int32_t render_device_create_render_pipeline(render_pipeline_config* config);
-void    render_device_destroy_render_pipeline();
+void rcmd_draw(rcmd* cmd, u32 first_vertex, u32 vertex_count, u32 first_instance,
+               u32 instance_count);
+void rcmd_draw_indexed(rcmd* cmd, u32 instance_count, u32 first_instance,
+                       u32 first_index, u32 vertex_offset);
+
+void rdev_init();
+void rdev_term();
+
+void rdev_create_swapchain(void* window, u32 w, u32 h);
+void rdev_resize_swapchain(u32 w, u32 height);
+void rdev_destroy_swapchain();
+
+rbuf_id  rdev_create_buffer();
+rpass_id rdev_create_renderpass();
+rpipe_id rdev_create_pipeline();
+
+void rdev_destroy_buffer(rbuf_id id);
+void rdev_destroy_renderpass(rpass_id id);
+void rdev_destroy_pipeline(rpipe_id id);
