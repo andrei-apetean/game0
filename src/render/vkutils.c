@@ -10,20 +10,22 @@
 #include "render/rtypes.h"
 
 // todo: move in platform specific
-VkBool32 check_presentation_support_xcb(VkPhysicalDevice d, uint32_t family) {
+VkBool32 vkutil_check_presentation_support_xcb(VkPhysicalDevice d,
+                                               uint32_t         family) {
     unused(d);
     unused(family);
     return VK_FALSE;
 }
 
-VkBool32 check_presentation_support_win32(VkPhysicalDevice d, uint32_t family) {
+VkBool32 vkutil_check_presentation_support_win32(VkPhysicalDevice d,
+                                                 uint32_t         family) {
     unused(d);
     unused(family);
     return VK_FALSE;
 }
 
-VkBool32 check_extension_support(VkPhysicalDevice d, const char** extensions,
-                                 uint32_t count) {
+VkBool32 vkutil_check_extension_support(VkPhysicalDevice d, const char** extensions,
+                                        uint32_t count) {
     uint32_t ext_count = 0;
     vkEnumerateDeviceExtensionProperties(d, NULL, &ext_count, NULL);
     VkExtensionProperties props[ext_count];
@@ -45,7 +47,7 @@ VkBool32 check_extension_support(VkPhysicalDevice d, const char** extensions,
     return VK_TRUE;
 }
 
-queue_families find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
+queue_families vkutil_find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
     queue_families qf = {
         .graphics = UINT32_MAX,
         .compute = UINT32_MAX,
@@ -64,15 +66,16 @@ queue_families find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
             VkBool32 supports_present = VK_FALSE;
             switch (window_api) {
                 case RDEV_WND_WL: {
-                    supports_present = check_presentation_support_wl(d, i);
+                    supports_present = vkutil_check_presentation_support_wl(d, i);
                     break;
                 }
                 case RDEV_WND_XCB: {
-                    supports_present = check_presentation_support_xcb(d, i);
+                    supports_present = vkutil_check_presentation_support_xcb(d, i);
                     break;
                 }
                 case RDEV_WND_WIN32: {
-                    supports_present = check_presentation_support_win32(d, i);
+                    supports_present =
+                        vkutil_check_presentation_support_win32(d, i);
                     break;
                 }
             }
@@ -115,7 +118,7 @@ queue_families find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
     return qf;
 }
 
-int32_t rate_device(device_info* info) {
+int32_t vkutil_rate_device(device_info* info) {
     if (info->families.graphics == UINT32_MAX || !info->extension_support) {
         return -1;
     }
@@ -161,7 +164,8 @@ int32_t rate_device(device_info* info) {
     return score;
 }
 
-VkSurfaceFormatKHR find_surface_format(VkPhysicalDevice d, VkSurfaceKHR surf) {
+VkSurfaceFormatKHR vkutil_find_surface_format(VkPhysicalDevice d,
+                                              VkSurfaceKHR     surf) {
     const VkFormat desired_fmts[] = {
         VK_FORMAT_B8G8R8A8_UNORM,
         VK_FORMAT_R8G8B8A8_UNORM,
@@ -172,9 +176,8 @@ VkSurfaceFormatKHR find_surface_format(VkPhysicalDevice d, VkSurfaceKHR surf) {
 
     uint32_t count;
     vkGetPhysicalDeviceSurfaceFormatsKHR(d, surf, &count, NULL);
-    VkSurfaceFormatKHR formats[count];
+    VkSurfaceFormatKHR formats[128];
     vkGetPhysicalDeviceSurfaceFormatsKHR(d, surf, &count, formats);
-
     const uint32_t desired_count = sizeof(desired_fmts) / sizeof(*desired_fmts);
 
     for (size_t i = 0; i < desired_count; i++) {
@@ -190,7 +193,7 @@ VkSurfaceFormatKHR find_surface_format(VkPhysicalDevice d, VkSurfaceKHR surf) {
     return formats[0];
 }
 
-VkFormat find_depth_format(VkPhysicalDevice d) {
+VkFormat vkutil_find_depth_format(VkPhysicalDevice d) {
     VkFormat candidates[] = {
         VK_FORMAT_D32_SFLOAT,
         VK_FORMAT_D32_SFLOAT_S8_UINT,
@@ -209,7 +212,7 @@ VkFormat find_depth_format(VkPhysicalDevice d) {
     return VK_FORMAT_UNDEFINED;
 }
 
-VkPresentModeKHR find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf) {
+VkPresentModeKHR vkutil_find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf) {
     uint32_t supported_count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(d, surf, &supported_count, NULL);
     VkPresentModeKHR supported[supported_count];
@@ -221,4 +224,16 @@ VkPresentModeKHR find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf) {
         }
     }
     return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+int32_t vkutil_find_memory_type(VkPhysicalDevice d, uint32_t bits, uint32_t flags) {
+    VkPhysicalDeviceMemoryProperties props;
+    vkGetPhysicalDeviceMemoryProperties(d, &props);
+    for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
+        if ((bits & (1 << i)) &&
+            (props.memoryTypes[i].propertyFlags & flags) == flags) {
+            return i;
+        }
+    }
+    return -1;
 }

@@ -20,19 +20,23 @@ typedef struct {
 } device_info;
 
 // todo: maybe chuck this all under one unified api
-VkBool32 check_presentation_support_wl(VkPhysicalDevice d, uint32_t family);
-VkBool32 check_presentation_support_xcb(VkPhysicalDevice d, uint32_t family);
-VkBool32 check_presentation_support_win32(VkPhysicalDevice d, uint32_t family);
+VkBool32 vkutil_check_presentation_support_wl(VkPhysicalDevice d, uint32_t family);
+VkBool32 vkutil_check_presentation_support_xcb(VkPhysicalDevice d, uint32_t family);
+VkBool32 vkutil_check_presentation_support_win32(VkPhysicalDevice d,
+                                                 uint32_t         family);
 
-VkBool32 check_extension_support(VkPhysicalDevice d, const char** extensions,
-                                 uint32_t count);
+VkBool32 vkutil_check_extension_support(VkPhysicalDevice d, const char** extensions,
+                                        uint32_t count);
 
-queue_families find_queue_families(VkPhysicalDevice d, rdev_wnd window_api);
+int32_t vkutil_rate_device(device_info* info);
 
-VkSurfaceFormatKHR find_surface_format(VkPhysicalDevice d, VkSurfaceKHR surf);
+queue_families vkutil_find_queue_families(VkPhysicalDevice d, rdev_wnd window_api);
 
-VkFormat find_depth_format(VkPhysicalDevice d);
+VkSurfaceFormatKHR vkutil_find_surface_format(VkPhysicalDevice d,
+                                              VkSurfaceKHR     surf);
 
-VkPresentModeKHR find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf);
+VkFormat vkutil_find_depth_format(VkPhysicalDevice d);
 
-int32_t rate_device(device_info* info);
+VkPresentModeKHR vkutil_find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf);
+
+int32_t vkutil_find_memory_type(VkPhysicalDevice d, uint32_t bits, uint32_t flags);

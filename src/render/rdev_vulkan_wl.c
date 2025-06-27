@@ -24,7 +24,7 @@ VkResult rdev_vulkan_create_surface_wl(rdev_vulkan* rdev_v, void* wnd_native) {
     return result;
 }
 
-VkBool32 check_presentation_support_wl(VkPhysicalDevice d, uint32_t family) {
+VkBool32 vkutil_check_presentation_support_wl(VkPhysicalDevice d, uint32_t family) {
     struct wl_display* display = wl_display_connect(NULL);
     if (!display) return VK_FALSE;
 

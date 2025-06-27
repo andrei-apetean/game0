@@ -1,7 +1,7 @@
 #include "base.h"
+#include "os_event.h"
 #include "wnd.h"
 #include "wnd_backend.h"
-#include "os_event.h"
 
 #ifdef WINDOW_BACKEND_LINUX
 #include <fcntl.h>
@@ -39,6 +39,10 @@ typedef struct {
     wnd_dispatcher dispatcher;
     float          width;
     float          height;
+    uint32_t       configured;
+    uint32_t       pending_width;
+    uint32_t       pending_height;
+    uint32_t       needs_buffer_resize;
 } wnd_wl;
 
 // todo; i'm not really a huge fan of this static backend
@@ -161,6 +165,10 @@ void wnd_init_wl() {
 void wnd_open_wl(const char* title, uint32_t w, uint32_t h) {
     backend.width = w;
     backend.height = h;
+    backend.configured = 0;
+    backend.needs_buffer_resize = 0;
+    backend.buffer = NULL;  // Initialize to NULL
+
     backend.handle.surface = wl_compositor_create_surface(backend.compositor);
     debug_assert(backend.handle.surface);
 
@@ -177,19 +185,23 @@ void wnd_open_wl(const char* title, uint32_t w, uint32_t h) {
     xdg_toplevel_add_listener(backend.toplevel, &toplevel_listener, &backend);
     xdg_toplevel_set_title(backend.toplevel, title);
     xdg_toplevel_set_app_id(backend.toplevel, title);
-    // xdg_toplevel_set_fullscreen(backend.toplevel, NULL);
 
-    create_shm_buffer(w, h);
-    wl_surface_attach(backend.handle.surface, backend.buffer, 0, 0);
+    // Set up input devices
     if (backend.seat) {
         backend.keyboard = wl_seat_get_keyboard(backend.seat);
         backend.pointer = wl_seat_get_pointer(backend.seat);
         wl_keyboard_add_listener(backend.keyboard, &kb_listener, &backend);
         wl_pointer_add_listener(backend.pointer, &pointer_listener, &backend);
     }
-    wl_surface_damage(backend.handle.surface, 0, 0, w, h);
+
+    // Commit to trigger initial configure events
     wl_surface_commit(backend.handle.surface);
-    wl_display_roundtrip(backend.handle.display);
+
+    // Wait for window to be configured (buffer will be created in shell_config)
+    while (!backend.configured) {
+        wl_display_dispatch(backend.handle.display);
+    }
+    debug_log("Window backend configured!\n");
 }
 
 void* wnd_window_handle_wl() { return &backend.handle; }
@@ -225,6 +237,11 @@ void wnd_set_title_wl(const char* title) {
     xdg_toplevel_set_app_id(backend.toplevel, title);
 }
 
+void wnd_get_size_wl(uint32_t* w, uint32_t* h) {
+    *w = backend.width;
+    *h = backend.height;
+}
+
 void wnd_attach_dispatcher_wl(wnd_dispatcher* disp) {
     backend.dispatcher.on_key = disp->on_key;
     backend.dispatcher.on_pointer_axis = disp->on_pointer_axis;
@@ -235,9 +252,7 @@ void wnd_attach_dispatcher_wl(wnd_dispatcher* disp) {
     backend.dispatcher.user_data = disp->user_data;
 }
 
-uint32_t wnd_backend_id_wl() {
-    return WINDOW_BACKEND_WL_ID;
-}
+uint32_t wnd_backend_id_wl() { return WINDOW_BACKEND_WL_ID; }
 
 void load_wnd_wl(wnd_api* api) {
     api->init = wnd_init_wl;
@@ -247,6 +262,7 @@ void load_wnd_wl(wnd_api* api) {
     api->backend_id = wnd_backend_id_wl;
     api->native_handle = wnd_window_handle_wl;
     api->set_title = wnd_set_title_wl;
+    api->get_size = wnd_get_size_wl;
     api->attach_dispatcher = wnd_attach_dispatcher_wl;
     // api->get_window_size = get_window_size_wl;
 }
@@ -288,7 +304,13 @@ static void shell_config(void* data, struct xdg_surface* shell_surface,
                          uint32_t serial) {
     xdg_surface_ack_configure(shell_surface, serial);
     wnd_wl* backend = data;
-    if (backend) wl_surface_commit(backend->handle.surface);
+
+    if (!backend->configured) {
+        backend->configured = 1;
+        debug_log("Window initially configured\n");
+    }
+
+    wl_surface_commit(backend->handle.surface);
 }
 
 static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
@@ -296,18 +318,36 @@ static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
                             struct wl_array* states) {
     unused(toplevel);
     unused(states);
+
     wnd_wl* backend = data;
-    debug_assert(backend);
+
+    debug_log("Configure event: %dx%d (current: %.0fx%.0f)\n", width, height,
+              backend->width, backend->height);
+
+    // Handle zero dimensions
+    if (width == 0 || height == 0) {
+        debug_log("Ignoring zero dimensions\n");
+        return;
+    }
+
     float win_width = (float)width;
     float win_height = (float)height;
-    if (backend->width == win_width && backend->height == win_height) return;
 
+    if (backend->width == win_width && backend->height == win_height) {
+        debug_log("Size unchanged, ignoring\n");
+        return;
+    }
+
+    backend->pending_width = width;
+    backend->pending_height = height;
     backend->width = win_width;
     backend->height = win_height;
+    backend->needs_buffer_resize = 1;
+
+    debug_log("Resizing to: %.0fx%.0f\n", win_width, win_height);
     if (backend->dispatcher.on_window_size) {
-        pfn_window_size on_size = backend->dispatcher.on_window_size;
-        void*           data = backend->dispatcher.user_data;
-        on_size(backend->width, backend->height, data);
+        backend->dispatcher.on_window_size(win_width, win_height,
+                                           backend->dispatcher.user_data);
     }
 }
 
@@ -446,37 +486,6 @@ static void pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time,
     float scroll = wl_fixed_to_double(value);
     void* udata = backend->dispatcher.user_data;
     backend->dispatcher.on_pointer_axis(scroll, udata);
-}
-
-static int create_shm_file(size_t size) {
-    int fd = shm_open("/shm-buffer", O_RDWR | O_CREAT, 0600);
-
-    if (fd < 0) return -1;
-
-    if (ftruncate(fd, size) < 0) {
-        close(fd);
-
-        return -1;
-    }
-
-    return fd;
-}
-
-static void create_shm_buffer(uint32_t width, uint32_t height) {
-    int stride = width * 4;
-    int size = stride * height;
-    int fd = create_shm_file(size);
-    debug_assert(fd >= 0);
-
-    void* data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    debug_assert(data != MAP_FAILED);
-    memset(data, 18, size);  // Fill buffer with white pixels
-    backend.pool = wl_shm_create_pool(backend.shm, fd, size);
-
-    backend.buffer = wl_shm_pool_create_buffer(backend.pool, 0, width, height,
-                                               stride, WL_SHM_FORMAT_XRGB8888);
-
-    close(fd);
 }
 
 static uint32_t evdev_to_keycode(uint32_t evdev_code) {

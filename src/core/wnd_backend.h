@@ -7,6 +7,7 @@ typedef struct {
     void (*terminate)();
     void (*dispatch_events)();
     void (*set_title)(const char* title);
+    void (*get_size)(uint32_t* w, uint32_t* h);
     void (*attach_dispatcher)(wnd_dispatcher* disp);
     void (*open)(const char* title, uint32_t w, uint32_t h);
     void* (*native_handle)();

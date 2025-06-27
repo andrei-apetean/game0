@@ -38,6 +38,11 @@ void wnd_set_title(const char* title) {
     wnd.set_title(title);
 }
 
+void wnd_get_size(uint32_t* w, uint32_t* h) {
+    debug_assert(is_initialized);
+    wnd.get_size(w, h);
+}
+
 void wnd_attach_dispatcher(wnd_dispatcher* disp) {
     debug_assert(is_initialized);
     wnd.attach_dispatcher(disp);

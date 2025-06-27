@@ -6,6 +6,7 @@
 
 #include "base.h"
 #include "vkutils.h"
+
 #define VULKAN_SURFACE_EXT "VK_KHR_surface"
 #define VULKAN_SWAPCHAIN_EXT "VK_KHR_swapchain"
 #define VULKAN_SURFACE_EXT_WL "VK_KHR_wayland_surface"
@@ -13,6 +14,12 @@
 #define VULKAN_SURFACE_EXT_WIN32 "VK_KHR_win32_surface"
 #define VULKAN_VALIDATION_LAYER "VK_LAYER_KHRONOS_validation"
 #define VULKAN_ENABLEMENT_COUNT 256
+
+//=========================================================
+//
+// context
+//
+//=========================================================
 
 VkResult rdev_vulkan_create_instance(rdev_vulkan* rdev) {
     uint32_t    extension_count = 0;
@@ -63,19 +70,7 @@ VkResult rdev_vulkan_create_instance(rdev_vulkan* rdev) {
     };
     VkResult result = vkCreateInstance(&inst_ci, rdev->allocator, &rdev->instance);
     VCHECK(result);
-    debug_log("Instance created successfully\n");
     return result;
-}
-
-VkResult rdev_vulkan_create_surface_xcb(rdev_vulkan* rdev, void* wnd_native) {
-    unimplemented(rdev_vulkan_create_surface_xcb) unused(rdev);
-    unused(wnd_native);
-    return VK_ERROR_UNKNOWN;
-}
-VkResult rdev_vulkan_create_surface_win32(rdev_vulkan* rdev, void* wnd_native) {
-    unimplemented(rdev_vulkan_create_surface_win32) unused(rdev);
-    unused(wnd_native);
-    return VK_ERROR_UNKNOWN;
 }
 
 VkResult rdev_vulkan_create_device(rdev_vulkan* rdev) {
@@ -97,20 +92,21 @@ VkResult rdev_vulkan_create_device(rdev_vulkan* rdev) {
         uint32_t extension_count = sizeof(extensions) / sizeof(*extensions);
         for (uint32_t i = 0; i < pdev_count; i++) {
             infos[i].device = devices[i];
-            infos[i].families = find_queue_families(devices[i], rdev->window_api);
+            infos[i].families =
+                vkutil_find_queue_families(devices[i], rdev->window_api);
             vkGetPhysicalDeviceProperties(devices[i], &infos[i].properties);
             vkGetPhysicalDeviceFeatures(devices[i], &infos[i].features);
             vkGetPhysicalDeviceMemoryProperties(devices[i], &infos[i].mem_props);
 
-            infos[i].extension_support =
-                check_extension_support(devices[i], extensions, extension_count);
+            infos[i].extension_support = vkutil_check_extension_support(
+                devices[i], extensions, extension_count);
         }
 
         int32_t best_score = -1;
         int32_t best_index = -1;
 
         for (uint32_t i = 0; i < pdev_count; i++) {
-            int32_t score = rate_device(&infos[i]);
+            int32_t score = vkutil_rate_device(&infos[i]);
             if (score > best_score) {
                 best_score = score;
                 best_index = i;
@@ -156,7 +152,7 @@ VkResult rdev_vulkan_create_device(rdev_vulkan* rdev) {
             families[unique_families_count++] = rdev->dev.transfer_family;
         }
 
-        const float queue_priority[] = {1.0f};
+        const float             queue_priority[] = {1.0f};
         VkDeviceQueueCreateInfo queue_infos[max_queue_families];
         for (uint32_t i = 0; i < unique_families_count; i++) {
             queue_infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -200,10 +196,9 @@ VkResult rdev_vulkan_create_device(rdev_vulkan* rdev) {
         } else {
             rdev->dev.transfer_queue = rdev->dev.graphics_queue;  // Fallback
         }
-        debug_log("Queues obtained: %d\n", unique_families_count);
     }
 
-    // command poll
+    // command pool
     {
         VkCommandPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -213,7 +208,7 @@ VkResult rdev_vulkan_create_device(rdev_vulkan* rdev) {
         };
         result = vkCreateCommandPool(rdev->dev.handle, &pool_info, rdev->allocator,
                                      &rdev->dev.cmd_pool);
-        if (result == VK_SUCCESS) debug_log("Command pool created!\n");
+        VCHECK(result);
     }
     return result;
 }
@@ -224,51 +219,59 @@ void rdev_vulkan_destroy_device(rdev_vulkan* rdev) {
     rdev->dev.physical = VK_NULL_HANDLE;
     rdev->dev.handle = VK_NULL_HANDLE;
     rdev->dev.graphics_queue = VK_NULL_HANDLE;
-    rdev->dev.compute_queue= VK_NULL_HANDLE;
-    rdev->dev.transfer_queue= VK_NULL_HANDLE;
+    rdev->dev.compute_queue = VK_NULL_HANDLE;
+    rdev->dev.transfer_queue = VK_NULL_HANDLE;
     rdev->dev.graphics_family = UINT32_MAX;
-    rdev->dev.compute_family= UINT32_MAX;
-    rdev->dev.transfer_family= UINT32_MAX;
- }
+    rdev->dev.compute_family = UINT32_MAX;
+    rdev->dev.transfer_family = UINT32_MAX;
+}
+
+//=========================================================
+//
+// presentation resources
+//
+//=========================================================
+
+VkResult rdev_vulkan_create_surface_xcb(rdev_vulkan* rdev, void* wnd_native) {
+    unimplemented(rdev_vulkan_create_surface_xcb) unused(rdev);
+    unused(wnd_native);
+    return VK_ERROR_UNKNOWN;
+}
+VkResult rdev_vulkan_create_surface_win32(rdev_vulkan* rdev, void* wnd_native) {
+    unimplemented(rdev_vulkan_create_surface_win32) unused(rdev);
+    unused(wnd_native);
+    return VK_ERROR_UNKNOWN;
+}
 
 VkResult rdev_vulkan_create_swapchain(rdev_vulkan* rdev, vswapchain* sc,
                                       VkExtent2D extent) {
-    VkSurfaceFormatKHR fmt = find_surface_format(rdev->dev.physical, rdev->surface);
-    VkFormat depth_fmt = find_depth_format(rdev->dev.physical);
-    if (depth_fmt == VK_FORMAT_UNDEFINED) {
-        debug_log("Failed to find depth format!\n");
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
-    VkPresentModeKHR present = find_present_mode(rdev->dev.physical, rdev->surface);
-
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rdev->dev.physical, rdev->surface,
                                               &caps);
     uint32_t image_count = caps.minImageCount + 1;
     if (image_count > caps.maxImageCount) image_count = caps.maxImageCount;
     sc->image_count = image_count;
-    VkExtent2D size = extent;
     VkExtent2D current_extent = caps.currentExtent;
-    if (current_extent.width == UINT32_MAX || extent.height == UINT32_MAX) {
-        current_extent.width = extent.width;
-        current_extent.height = extent.height;
-        current_extent.width = VCLAMP(size.width, caps.minImageExtent.width,
-                                caps.maxImageExtent.width);
-        current_extent.height = VCLAMP(size.height, caps.minImageExtent.height,
-                                 caps.maxImageExtent.height);
+    if (current_extent.width != UINT32_MAX) {
+        extent = current_extent;
+    } else {
+        current_extent.width = VCLAMP(extent.width, caps.minImageExtent.width,
+                                      caps.maxImageExtent.width);
+        current_extent.height = VCLAMP(extent.height, caps.minImageExtent.height,
+                                       caps.maxImageExtent.height);
     }
 
     VkSurfaceTransformFlagBitsKHR pretransform =
         (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
             ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
             : caps.currentTransform;
+    sc->extent = current_extent;
     VkSwapchainCreateInfoKHR sc_ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = rdev->surface,
         .minImageCount = image_count,
-        .imageFormat = fmt.format,
-        .imageColorSpace = fmt.colorSpace,
+        .imageFormat = sc->surface_fmt.format,
+        .imageColorSpace = sc->surface_fmt.colorSpace,
         .imageExtent = current_extent,
         .imageArrayLayers = 1,
         .imageUsage =
@@ -276,31 +279,260 @@ VkResult rdev_vulkan_create_swapchain(rdev_vulkan* rdev, vswapchain* sc,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = pretransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = present,
+        .presentMode = sc->present_mode,
         .clipped = VK_TRUE,
     };
-    VkResult result = vkCreateSwapchainKHR(rdev->dev.handle, &sc_ci, rdev->allocator,
-                                  &sc->handle);
+    VkResult result = vkCreateSwapchainKHR(rdev->dev.handle, &sc_ci,
+                                           rdev->allocator, &sc->handle);
     if (result != VK_SUCCESS) return result;
 
-    debug_log("Swapchain created!\n");
-    return VK_FALSE;
+    uint32_t img_count = 0;
+    vkGetSwapchainImagesKHR(rdev->dev.handle, sc->handle, &img_count, NULL);
+    debug_assert(img_count <= VSWAPCHAIN_MAX_IMG);
+    vkGetSwapchainImagesKHR(rdev->dev.handle, sc->handle, &img_count,
+                            sc->color_imgs);
+
+    for (uint32_t i = 0; i < image_count; i++) {
+        VkImageViewCreateInfo color_view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = sc->color_imgs[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = sc->surface_fmt.format,
+            .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .components.a = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .subresourceRange.baseMipLevel = 0,
+            .subresourceRange.baseArrayLayer = 0,
+            .subresourceRange.levelCount = 1,
+            .subresourceRange.layerCount = 1,
+
+        };
+        result = vkCreateImageView(rdev->dev.handle, &color_view_info,
+                                   rdev->allocator, &sc->color_views[i]);
+
+        VCHECK(result);
+        if (result != VK_SUCCESS) return result;
+
+        // depth attachments
+
+        VkImageCreateInfo depth_img_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = sc->depth_fmt,
+            .extent = {current_extent.width, current_extent.height, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+
+        result = vkCreateImage(rdev->dev.handle, &depth_img_info, rdev->allocator,
+                               &sc->depth_imgs[i]);
+        VCHECK(result);
+        if (result != VK_SUCCESS) return result;
+
+        VkMemoryRequirements mem_reqs;
+        vkGetImageMemoryRequirements(rdev->dev.handle, sc->depth_imgs[i],
+                                     &mem_reqs);
+
+        // Allocate
+        int32_t memory_type =
+            vkutil_find_memory_type(rdev->dev.physical, mem_reqs.memoryTypeBits,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        debug_assert(memory_type != -1);
+        VkMemoryAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = mem_reqs.size,
+            .memoryTypeIndex = memory_type,
+        };
+
+        result = vkAllocateMemory(rdev->dev.handle, &alloc_info, rdev->allocator,
+                                  &sc->depth_mem[i]);
+        if (result != VK_SUCCESS) return result;
+
+        result = vkBindImageMemory(rdev->dev.handle, sc->depth_imgs[i],
+                                   sc->depth_mem[i], 0);
+        if (result != VK_SUCCESS) return result;
+
+        VkImageViewCreateInfo depth_view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = sc->depth_imgs[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = sc->depth_fmt,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .subresourceRange.baseMipLevel = 0,
+            .subresourceRange.levelCount = 1,
+            .subresourceRange.baseArrayLayer = 0,
+            .subresourceRange.layerCount = 1,
+        };
+
+        result = vkCreateImageView(rdev->dev.handle, &depth_view_info,
+                                   rdev->allocator, &sc->depth_views[i]);
+        if (result != VK_SUCCESS) return result;
+    }
+    // todo: handle result failure
+
+    return result;
 }
 
 void rdev_vulkan_destroy_swapchain(rdev_vulkan* rdev, vswapchain* sc) {
-    (void)rdev;
-    (void)sc;
+    vkDeviceWaitIdle(rdev->dev.handle);
+    for (uint32_t i = 0; i < sc->image_count; i++) {
+        vkDestroyImage(rdev->dev.handle, sc->depth_imgs[i], rdev->allocator);
+        vkDestroyImageView(rdev->dev.handle, sc->color_views[i], rdev->allocator);
+        vkDestroyImageView(rdev->dev.handle, sc->depth_views[i], rdev->allocator);
+        vkFreeMemory(rdev->dev.handle, sc->depth_mem[i], rdev->allocator);
+    }
+    vkDestroySwapchainKHR(rdev->dev.handle, sc->handle, rdev->allocator);
+    debug_log("Renderer: swapchain destroyed\n");
+}
+
+VkResult rdev_vulkan_create_framebuffers(rdev_vulkan* rdev, vswapchain* sc) {
+    VkResult result;
+    for (uint32_t i = 0; i < sc->image_count; i++) {
+        VkImageView attachments[] = {
+            sc->color_views[i],
+            sc->depth_views[i],
+        };
+        VkFramebufferCreateInfo frame_info = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = sc->rpass.handle,
+            .attachmentCount = sizeof(attachments) / sizeof(attachments[0]),
+            .pAttachments = attachments,
+            .width = sc->extent.width,
+            .height = sc->extent.height,
+            .layers = 1,
+        };
+        result = vkCreateFramebuffer(rdev->dev.handle, &frame_info, rdev->allocator,
+                                     &sc->framebuffers[i]);
+        if (result != VK_SUCCESS) return result;
+    }
+    return result;
+}
+
+void rdev_vulkan_destroy_framebuffers(rdev_vulkan* rdev, vswapchain* sc) {
+    for (uint32_t i = 0; i < sc->image_count; i++) {
+        vkDestroyFramebuffer(rdev->dev.handle, sc->framebuffers[i],
+                             rdev->allocator);
+    }
 }
 
 VkResult rdev_vulkan_create_semaphores(rdev_vulkan* rdev, uint32_t count) {
-    (void)rdev;
-    (void)count;
-    return VK_FALSE;
+    VkSemaphoreCreateInfo sem_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    VkResult result;
+    for (uint32_t i = 0; i < count; i++) {
+        result = vkCreateSemaphore(rdev->dev.handle, &sem_info, rdev->allocator,
+                                   &rdev->image_available_semaphores[i]);
+        if (result != VK_SUCCESS) return result;
+        result = vkCreateSemaphore(rdev->dev.handle, &sem_info, rdev->allocator,
+                          &rdev->render_finished_semaphores[i]);
+        if (result != VK_SUCCESS) return result;
+    }
+    return result;
 }
 
 void rdev_vulkan_destroy_semaphores(rdev_vulkan* rdev, uint32_t count) {
-    (void)rdev;
-    (void)count;
+    for (uint32_t i = 0; i < count; i++) {
+        vkDestroySemaphore(rdev->dev.handle, rdev->image_available_semaphores[i],
+                           rdev->allocator);
+        vkDestroySemaphore(rdev->dev.handle, rdev->render_finished_semaphores[i],
+                           rdev->allocator);
+    }
+}
+
+VkResult rdev_vulkan_create_fences(rdev_vulkan* rdev, uint32_t count) {
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+    };
+    VkResult result;
+    for (uint32_t i = 0; i < count; i++) {
+        result = vkCreateFence(rdev->dev.handle, &fence_info, rdev->allocator,
+                               &rdev->inflight_fences[i]);
+        if (result != VK_SUCCESS) return result;
+    }
+    return result;
+}
+
+void rdev_vulkan_destroy_fences(rdev_vulkan* rdev, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        vkDestroyFence(rdev->dev.handle, rdev->inflight_fences[i], rdev->allocator);
+    }
+}
+
+//=========================================================
+//
+// rendering resources
+//
+//=========================================================
+
+VkResult rdev_vulkan_create_swapchainpass(rdev_vulkan* rdev, vswapchain* sc) {
+    VkAttachmentDescription depth_attachment = {
+        .format = sc->depth_fmt,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    VkAttachmentDescription color_attachment = {
+        .format = sc->surface_fmt.format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
+
+    VkAttachmentReference color_attachment_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    VkAttachmentReference depth_attachment_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment_ref,
+        .pDepthStencilAttachment = &depth_attachment_ref,
+    };
+
+    VkAttachmentDescription attachments[2] = {
+        color_attachment,
+        depth_attachment,
+    };
+
+    VkRenderPassCreateInfo renderpass_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = sizeof(attachments) / sizeof(attachments[0]),
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+    };
+
+    VkResult result = vkCreateRenderPass(rdev->dev.handle, &renderpass_info,
+                                         rdev->allocator, &sc->rpass.handle);
+    VCHECK(result);
+    return result;
+}
+
+void rdev_vulkan_destroy_swapchainpass(rdev_vulkan* rdev, vswapchain* sc) {
+    vkDestroyRenderPass(rdev->dev.handle, sc->rpass.handle, rdev->allocator);
 }
 
 VkResult rdev_vulkan_create_pipeline(rdev_vulkan* rdev, vpipe* pipe) {
@@ -314,28 +546,12 @@ void rdev_vulkan_destroy_pipeline(rdev_vulkan* rdev, vpipe* pipe) {
     (void)pipe;
 }
 
-VkResult rdev_vulkan_create_framebuffers(rdev_vulkan* rdev, vpass* pass,
-                                         uint32_t count, VkExtent2D extent) {
-    (void)rdev;
-    (void)pass;
-    (void)count;
-    (void)extent;
-    return VK_FALSE;
-}
-void rdev_vulkan_destroy_framebuffers(rdev_vulkan* rdev, uint32_t count) {
-    (void)rdev;
-    (void)count;
-}
 
-VkResult rdev_vulkan_create_fences(rdev_vulkan* rdev, uint32_t count) {
-    (void)rdev;
-    (void)count;
-    return VK_FALSE;
-}
-void rdev_vulkan_destroy_fences(rdev_vulkan* rdev, uint32_t count) {
-    (void)rdev;
-    (void)count;
-}
+//=========================================================
+//
+// graphics resources
+//
+//=========================================================
 
 #ifdef _DEBUG
 static VkBool32 debug_utils_callback(
@@ -365,12 +581,10 @@ VkResult rdev_vulkan_create_dbg_msgr(rdev_vulkan*              rdev,
     for (size_t i = 0; i < ext_count; i++) {
         if (!strcmp(extensions[i].extensionName, dbg_ext_name)) {
             debug_extension_present = 1;
-            debug_log("Debug extension present!\n");
             break;
         }
     }
     if (!debug_extension_present) {
-        debug_log("Debug utils messenger extension not present!\n");
         return VK_FALSE;
     }
     const VkDebugUtilsMessengerCreateInfoEXT dbg_ci = {
@@ -389,8 +603,7 @@ VkResult rdev_vulkan_create_dbg_msgr(rdev_vulkan*              rdev,
         return VK_FALSE;
     }
     VkResult result = create_debug_msgr(rdev->instance, &dbg_ci, 0, m);
-    debug_assert(result == VK_SUCCESS);
-    debug_log("Debug messenger created!\n");
+    VCHECK(result);
     return result;
 }
 
