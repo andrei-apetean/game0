@@ -201,7 +201,6 @@ void wnd_open_wl(const char* title, uint32_t w, uint32_t h) {
     while (!backend.configured) {
         wl_display_dispatch(backend.handle.display);
     }
-    debug_log("Window backend configured!\n");
 }
 
 void* wnd_window_handle_wl() { return &backend.handle; }
@@ -307,7 +306,6 @@ static void shell_config(void* data, struct xdg_surface* shell_surface,
 
     if (!backend->configured) {
         backend->configured = 1;
-        debug_log("Window initially configured\n");
     }
 
     wl_surface_commit(backend->handle.surface);
@@ -318,15 +316,10 @@ static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
                             struct wl_array* states) {
     unused(toplevel);
     unused(states);
-
     wnd_wl* backend = data;
-
-    debug_log("Configure event: %dx%d (current: %.0fx%.0f)\n", width, height,
-              backend->width, backend->height);
 
     // Handle zero dimensions
     if (width == 0 || height == 0) {
-        debug_log("Ignoring zero dimensions\n");
         return;
     }
 
@@ -334,7 +327,6 @@ static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
     float win_height = (float)height;
 
     if (backend->width == win_width && backend->height == win_height) {
-        debug_log("Size unchanged, ignoring\n");
         return;
     }
 
@@ -344,7 +336,6 @@ static void toplevel_config(void* data, struct xdg_toplevel* toplevel,
     backend->height = win_height;
     backend->needs_buffer_resize = 1;
 
-    debug_log("Resizing to: %.0fx%.0f\n", win_width, win_height);
     if (backend->dispatcher.on_window_size) {
         backend->dispatcher.on_window_size(win_width, win_height,
                                            backend->dispatcher.user_data);

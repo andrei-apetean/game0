@@ -11,7 +11,7 @@ typedef struct {
     struct wl_surface* surface;
 } window_handle_wl;
 
-VkResult rdev_vulkan_create_surface_wl(rdev_vulkan* rdev_v, void* wnd_native) {
+VkResult vcreate_surface_wl(vstate* v, void* wnd_native) {
     window_handle_wl* handle = (window_handle_wl*)wnd_native;
     VkWaylandSurfaceCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
@@ -19,12 +19,12 @@ VkResult rdev_vulkan_create_surface_wl(rdev_vulkan* rdev_v, void* wnd_native) {
         .surface = handle->surface,
     };
     VkResult result = vkCreateWaylandSurfaceKHR(
-        rdev_v->instance, &ci, rdev_v->allocator, &rdev_v->surface);
+        v->instance, &ci, v->allocator, &v->surface);
     VCHECK(result);
     return result;
 }
 
-VkBool32 vkutil_check_presentation_support_wl(VkPhysicalDevice d, uint32_t family) {
+VkBool32 vutl_present_supported_wl(VkPhysicalDevice d, uint32_t family) {
     struct wl_display* display = wl_display_connect(NULL);
     if (!display) return VK_FALSE;
 
@@ -34,8 +34,8 @@ VkBool32 vkutil_check_presentation_support_wl(VkPhysicalDevice d, uint32_t famil
 }
 #else
 
-VkBool32 check_presentation_support_wl(VkPhysicalDevice d, uint32_t family) {
+VkBool32 vutl_present_supported_wl(VkPhysicalDevice d, uint32_t family) {
     return VK_FALSE;
 }
-void rdev_vulkan_create_surface_wl(rdev_vulkan* rdev_v, void* wnd_native) {}
+void vcreate_surface_wl(rdev_vulkan* rdev_v, void* wnd_native) {}
 #endif  // GAME0_LINUX

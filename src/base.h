@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stddef.h>
 #include <stdint.h>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -20,7 +19,6 @@
 #define mgiga(bytes) bytes * 1024 * 1024 * 1024
 
 #define unused(x) (void)(x)
-
 
 void debug_log(const char* fmt, ...);
 void debug_abort(void);

@@ -1,6 +1,7 @@
 #pragma once
 #include "vkutils.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
@@ -10,22 +11,20 @@
 #include "render/rtypes.h"
 
 // todo: move in platform specific
-VkBool32 vkutil_check_presentation_support_xcb(VkPhysicalDevice d,
-                                               uint32_t         family) {
+VkBool32 vutl_present_supported_xcb(VkPhysicalDevice d, uint32_t family) {
     unused(d);
     unused(family);
     return VK_FALSE;
 }
 
-VkBool32 vkutil_check_presentation_support_win32(VkPhysicalDevice d,
-                                                 uint32_t         family) {
+VkBool32 vutl_present_supported_win32(VkPhysicalDevice d, uint32_t family) {
     unused(d);
     unused(family);
     return VK_FALSE;
 }
 
-VkBool32 vkutil_check_extension_support(VkPhysicalDevice d, const char** extensions,
-                                        uint32_t count) {
+VkBool32 vutl_extensions_supported(VkPhysicalDevice d, const char** extensions,
+                                       uint32_t count) {
     uint32_t ext_count = 0;
     vkEnumerateDeviceExtensionProperties(d, NULL, &ext_count, NULL);
     VkExtensionProperties props[ext_count];
@@ -47,7 +46,7 @@ VkBool32 vkutil_check_extension_support(VkPhysicalDevice d, const char** extensi
     return VK_TRUE;
 }
 
-queue_families vkutil_find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
+queue_families vutl_find_queue_families(VkPhysicalDevice d, rdev_wnd window_api) {
     queue_families qf = {
         .graphics = UINT32_MAX,
         .compute = UINT32_MAX,
@@ -66,16 +65,15 @@ queue_families vkutil_find_queue_families(VkPhysicalDevice d, rdev_wnd window_ap
             VkBool32 supports_present = VK_FALSE;
             switch (window_api) {
                 case RDEV_WND_WL: {
-                    supports_present = vkutil_check_presentation_support_wl(d, i);
+                    supports_present = vutl_present_supported_wl(d, i);
                     break;
                 }
                 case RDEV_WND_XCB: {
-                    supports_present = vkutil_check_presentation_support_xcb(d, i);
+                    supports_present = vutl_present_supported_xcb(d, i);
                     break;
                 }
                 case RDEV_WND_WIN32: {
-                    supports_present =
-                        vkutil_check_presentation_support_win32(d, i);
+                    supports_present = vutl_present_supported_win32(d, i);
                     break;
                 }
             }
@@ -118,7 +116,7 @@ queue_families vkutil_find_queue_families(VkPhysicalDevice d, rdev_wnd window_ap
     return qf;
 }
 
-int32_t vkutil_rate_device(device_info* info) {
+int32_t vutl_rate_device(device_info* info) {
     if (info->families.graphics == UINT32_MAX || !info->extension_support) {
         return -1;
     }
@@ -164,8 +162,8 @@ int32_t vkutil_rate_device(device_info* info) {
     return score;
 }
 
-VkSurfaceFormatKHR vkutil_find_surface_format(VkPhysicalDevice d,
-                                              VkSurfaceKHR     surf) {
+VkSurfaceFormatKHR vutl_find_surface_format(VkPhysicalDevice d,
+                                             VkSurfaceKHR     surf) {
     const VkFormat desired_fmts[] = {
         VK_FORMAT_B8G8R8A8_UNORM,
         VK_FORMAT_R8G8B8A8_UNORM,
@@ -184,16 +182,15 @@ VkSurfaceFormatKHR vkutil_find_surface_format(VkPhysicalDevice d,
         for (size_t j = 0; j < count; j++) {
             if (formats[j].format == desired_fmts[i] &&
                 formats[j].colorSpace == color_space) {
-                debug_log("Found image format: %d\n", formats[j].format);
                 return formats[j];
             }
         }
     }
-    debug_log("Desired image format not found, using available!\n");
+    debug_log("desired image format not found, using available!\n");
     return formats[0];
 }
 
-VkFormat vkutil_find_depth_format(VkPhysicalDevice d) {
+VkFormat vutl_find_depth_format(VkPhysicalDevice d) {
     VkFormat candidates[] = {
         VK_FORMAT_D32_SFLOAT,
         VK_FORMAT_D32_SFLOAT_S8_UINT,
@@ -205,14 +202,13 @@ VkFormat vkutil_find_depth_format(VkPhysicalDevice d) {
         vkGetPhysicalDeviceFormatProperties(d, candidates[i], &props);
         if (props.optimalTilingFeatures &
             VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-            debug_log("Found depth format: %d\n", candidates[i]);
             return candidates[i];
         }
     }
     return VK_FORMAT_UNDEFINED;
 }
 
-VkPresentModeKHR vkutil_find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf) {
+VkPresentModeKHR vutl_find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf) {
     uint32_t supported_count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(d, surf, &supported_count, NULL);
     VkPresentModeKHR supported[supported_count];
@@ -226,7 +222,7 @@ VkPresentModeKHR vkutil_find_present_mode(VkPhysicalDevice d, VkSurfaceKHR surf)
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-int32_t vkutil_find_memory_type(VkPhysicalDevice d, uint32_t bits, uint32_t flags) {
+int32_t vutl_find_memory_type(VkPhysicalDevice d, uint32_t bits, uint32_t flags) {
     VkPhysicalDeviceMemoryProperties props;
     vkGetPhysicalDeviceMemoryProperties(d, &props);
     for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
@@ -236,4 +232,56 @@ int32_t vkutil_find_memory_type(VkPhysicalDevice d, uint32_t bits, uint32_t flag
         }
     }
     return -1;
+}
+
+VkShaderStageFlagBits vutl_to_vulkan_shader_stage(rshader_type type) {
+    switch (type) {
+        case RSHADER_TYPE_VERTEX:
+            return VK_SHADER_STAGE_VERTEX_BIT;
+        case RSHADER_TYPE_FRAGMENT:
+            return VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+}
+
+VkFormat vutl_to_vulkan_format(rvertex_format fmt) {
+    switch (fmt) {
+        case RVERTEX_FORMAT_FLOAT:
+            return VK_FORMAT_R32_SFLOAT;
+        case RVERTEX_FORMAT_FLOAT2:
+            return VK_FORMAT_R32G32_SFLOAT;
+        case RVERTEX_FORMAT_FLOAT3:
+            return VK_FORMAT_R32G32B32_SFLOAT;
+        case RVERTEX_FORMAT_FLOAT4:
+            return VK_FORMAT_R32G32B32A32_SFLOAT;
+
+        case RVERTEX_FORMAT_INT:
+            return VK_FORMAT_R32_SINT;
+        case RVERTEX_FORMAT_INT2:
+            return VK_FORMAT_R32G32_SINT;
+        case RVERTEX_FORMAT_INT3:
+            return VK_FORMAT_R32G32B32_SINT;
+        case RVERTEX_FORMAT_INT4:
+            return VK_FORMAT_R32G32B32A32_SINT;
+
+        case RVERTEX_FORMAT_UINT:
+            return VK_FORMAT_R32_UINT;
+        case RVERTEX_FORMAT_UINT2:
+            return VK_FORMAT_R32G32_UINT;
+        case RVERTEX_FORMAT_UINT3:
+            return VK_FORMAT_R32G32B32_UINT;
+        case RVERTEX_FORMAT_UINT4:
+            return VK_FORMAT_R32G32B32A32_UINT;
+
+        case RVERTEX_FORMAT_UNORM8_4:
+            return VK_FORMAT_R8G8B8A8_UNORM;
+    }
+}
+
+VkShaderStageFlags vutl_to_vulkan_shader_stage_flags(rshader_stage_flags flags) {
+    VkShaderStageFlags vk_flags = 0;
+    if (flags & RSHADER_STAGE_VERTEX) vk_flags |= VK_SHADER_STAGE_VERTEX_BIT;
+    if (flags & RSHADER_STAGE_FRAGMENT) vk_flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (flags & RSHADER_STAGE_COMPUTE) vk_flags |= VK_SHADER_STAGE_COMPUTE_BIT;
+    if (flags & RSHADER_STAGE_GEOMETRY) vk_flags |= VK_SHADER_STAGE_GEOMETRY_BIT;
+    return vk_flags;
 }

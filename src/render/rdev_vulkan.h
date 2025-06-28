@@ -1,6 +1,5 @@
 #pragma once
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 #include "render/rtypes.h"
 
@@ -11,6 +10,13 @@
 
 #define VCHECK(x) debug_assert((x) == VK_SUCCESS);
 #define VCLAMP(x, min, max) (x < min ? min : x > max ? max : x)
+
+typedef struct {
+    rshader_type   type;
+    VkShaderModule handle;
+    uint32_t*      code;
+    uint32_t       code_size;
+} vshader;
 
 struct rcmd {
     VkCommandBuffer handle;
@@ -26,18 +32,25 @@ typedef struct {
 } vimage;
 
 typedef struct {
-    VkBuffer       handle;
-    VkDeviceMemory memory;
-    VkDeviceSize   size;
-    rbuf_id        id;
+    rbuffer_id               id;
+    VkBuffer              handle;
+    VkDeviceMemory        memory;
+    VkDeviceSize          size;
+    VkBufferUsageFlags    usage;
+    VkMemoryPropertyFlags mem_props;
+    void*                 mapped_ptr;
+    uint32_t              is_mapped;
 } vbuf;
 
 typedef struct {
-    VkRenderPass handle;
     rpass_id     id;
+    VkRenderPass handle;
 } vpass;
 
 typedef struct {
+    rpipe_id         id;
+    VkPipeline       handle;
+    VkPipelineLayout layout;
 } vpipe;
 
 typedef struct {
@@ -82,10 +95,11 @@ typedef struct {
     VkFence                inflight_fences[VSWAPCHAIN_MAX_IMG];
     VkSemaphore            image_available_semaphores[VSWAPCHAIN_MAX_IMG];
     VkSemaphore            render_finished_semaphores[VSWAPCHAIN_MAX_IMG];
+    vpipe                  pipes[VPIPE_MAX_COUNT];
     rdev_wnd               window_api;
     uint32_t               image_index;
     uint32_t               current_frame;
-} rdev_vulkan;
+} vstate;
 
 //=========================================================
 //
@@ -93,10 +107,10 @@ typedef struct {
 //
 //=========================================================
 
-VkResult rdev_vulkan_create_instance(rdev_vulkan* rdev);
+VkResult vcreate_instance(vstate* rdev);
 
-VkResult rdev_vulkan_create_device(rdev_vulkan* rdev);
-void     rdev_vulkan_destroy_device(rdev_vulkan* rdev);
+VkResult vcreate_device(vstate* rdev);
+void     vdestroy_device(vstate* rdev);
 
 //=========================================================
 //
@@ -104,37 +118,15 @@ void     rdev_vulkan_destroy_device(rdev_vulkan* rdev);
 //
 //=========================================================
 
-VkResult rdev_vulkan_create_surface_wl(rdev_vulkan* rdev, void* wnd_native);
-VkResult rdev_vulkan_create_surface_xcb(rdev_vulkan* rdev, void* wnd_native);
-VkResult rdev_vulkan_create_surface_win32(rdev_vulkan* rdev, void* wnd_native);
+VkResult vcreate_surface_wl(vstate* v, void* wnd_native);
+VkResult vcreate_surface_xcb(vstate* v, void* wnd_native);
+VkResult vcreate_surface_win32(vstate* v, void* wnd_native);
 
-VkResult rdev_vulkan_create_swapchain(rdev_vulkan* rdev, vswapchain* sc,
-                                      VkExtent2D extent);
-void     rdev_vulkan_destroy_swapchain(rdev_vulkan* rdev, vswapchain* sc);
+VkResult vcreate_swapchain(vstate* v, vswapchain* sc, VkExtent2D extent);
+void     vdestroy_swapchain(vstate* v, vswapchain* sc);
 
-VkResult rdev_vulkan_create_framebuffers(rdev_vulkan* rdev, vswapchain* sc);
-void     rdev_vulkan_destroy_framebuffers(rdev_vulkan* rdev, vswapchain* sc);
-
-//=========================================================
-//
-// rendering resources
-//
-//=========================================================
-
-VkResult rdev_vulkan_create_swapchainpass(rdev_vulkan* rdev, vswapchain* sc);
-void     rdev_vulkan_destroy_swapchainpass(rdev_vulkan* rdev, vswapchain* sc);
-
-VkResult rdev_vulkan_create_semaphores(rdev_vulkan* rdev, uint32_t count);
-void     rdev_vulkan_destroy_semaphores(rdev_vulkan* rdev, uint32_t count);
-
-VkResult rdev_vulkan_create_fences(rdev_vulkan* rdev, uint32_t count);
-void     rdev_vulkan_destroy_fences(rdev_vulkan* rdev, uint32_t count);
-
-VkResult rdev_vulkan_create_pipeline(rdev_vulkan* rdev, vpipe* pipe);
-void     rdev_vulkan_destroy_pipeline(rdev_vulkan* rdev, vpipe* pipe);
-
-VkResult rdev_vulkan_create_fences(rdev_vulkan* rdev, uint32_t count);
-void     rdev_vulkan_destroy_fences(rdev_vulkan* rdev, uint32_t count);
+VkResult vcreate_framebuffers(vstate* v, vswapchain* sc);
+void     vdestroy_framebuffers(vstate* v, vswapchain* sc);
 
 //=========================================================
 //
@@ -142,8 +134,41 @@ void     rdev_vulkan_destroy_fences(rdev_vulkan* rdev, uint32_t count);
 //
 //=========================================================
 
+VkResult vcreate_swapchainpass(vstate* v, vswapchain* sc);
+void     vdestroy_swapchainpass(vstate* v, vswapchain* sc);
+
+VkResult vcreate_semaphores(vstate* v, uint32_t count);
+void     vdestroy_semaphores(vstate* v, uint32_t count);
+
+VkResult vcreate_fences(vstate* v, uint32_t count);
+void     vdestroy_fences(vstate* v, uint32_t count);
+
+VkResult vcreate_pipeline(vstate* v, vpipe* pipe, rpipe_params* params,
+                          vshader* modules);
+void     vdestroy_pipeline(vstate* v, vpipe* pipe);
+
+VkResult vcreate_shader_modules(vstate* v, vshader* shaders, uint32_t count);
+void     vdestroy_shader_modules(vstate* v, vshader* shaders, uint32_t count);
+
+VkRenderPass vrenderpass_from_id(vstate* v, rpass_id id);
+VkResult     vcreate_fences(vstate* v, uint32_t count);
+void         vdestroy_fences(vstate* v, uint32_t count);
+
+VkCommandBuffer vbegin_transfer_cmd(vstate* v);
+void            vend_transfer_cmd(vstate* v, VkCommandBuffer cmd);
+
+
+
+VkResult vcreate_buffer(vstate* v, rbuf_params* params, vbuf* buf);
+void vdestroy_buffer(vstate* v, vbuf* buf);
+
+VkResult vupload_buffer(vstate* v, vbuf* buf, void* data, uint32_t size, uint32_t offset);
+VkResult vdownload_buffer(vstate* v, vbuf* buf, void* data, uint32_t size, uint32_t offset);
+
+void* vbuffer_map(vstate* v, vbuf* buf);
+void vbuffer_unmap(vstate* v, vbuf* buf);
+
 #ifdef _DEBUG
-VkResult rdev_vulkan_create_dbg_msgr(rdev_vulkan*              rdev,
-                                     VkDebugUtilsMessengerEXT* m);
-void rdev_vulkan_destroy_dbg_msgr(rdev_vulkan* rdev, VkDebugUtilsMessengerEXT m);
+VkResult vcreate_dbg_msgr(vstate* v, VkDebugUtilsMessengerEXT* m);
+void     vdestroy_dbg_msgr(vstate* v, VkDebugUtilsMessengerEXT m);
 #endif  // _DEBUG

@@ -11,147 +11,158 @@
 static VkDebugUtilsMessengerEXT dbg_msgr = VK_NULL_HANDLE;
 #endif  //_DEBUG
 
-static rdev_vulkan rvk = {0};
+static vstate vk = {0};
 
 void rdev_init(rdev_params* params) {
+    debug_log("initializing rdev...\n");
     VkResult result = VK_SUCCESS;
-    rvk.window_api = params->wnd_api;
-    rdev_vulkan_create_instance(&rvk);
+    vk.window_api = params->wnd_api;
+    vcreate_instance(&vk);
 
 #ifdef _DEBUG
-    result = rdev_vulkan_create_dbg_msgr(&rvk, &dbg_msgr);
+    result = vcreate_dbg_msgr(&vk, &dbg_msgr);
     debug_assert(result == VK_SUCCESS);
 #endif  // _DEBUG
 
-    result = rdev_vulkan_create_device(&rvk);
+    result = vcreate_device(&vk);
     debug_assert(result == VK_SUCCESS);
 
     VkCommandBufferAllocateInfo alloc_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = rvk.dev.cmd_pool,
+        .commandPool = vk.dev.cmd_pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = VSWAPCHAIN_MAX_IMG,
     };
     VkCommandBuffer cmd_buffers[VSWAPCHAIN_MAX_IMG];
 
-    result = vkAllocateCommandBuffers(rvk.dev.handle, &alloc_info, cmd_buffers);
+    result = vkAllocateCommandBuffers(vk.dev.handle, &alloc_info, cmd_buffers);
     for (uint32_t i = 0; i < VSWAPCHAIN_MAX_IMG; i++) {
-        rvk.rcmds[i].handle = cmd_buffers[i];
+        vk.rcmds[i].handle = cmd_buffers[i];
     }
 
     debug_assert(result == VK_SUCCESS);
 
-    result = rdev_vulkan_create_semaphores(&rvk, VSWAPCHAIN_MAX_IMG);
+    result = vcreate_semaphores(&vk, VSWAPCHAIN_MAX_IMG);
     debug_assert(result == VK_SUCCESS);
-    result = rdev_vulkan_create_fences(&rvk, VSWAPCHAIN_MAX_IMG);
+    result = vcreate_fences(&vk, VSWAPCHAIN_MAX_IMG);
     debug_assert(result == VK_SUCCESS);
-    debug_log("Renderer: Render context initialized\n");
+    debug_log("rdev context initialized\n");
 }
 
 void rdev_terminate() {
-    vkDeviceWaitIdle(rvk.dev.handle);
+    vkDeviceWaitIdle(vk.dev.handle);
     VkCommandBuffer cmd_buffers[VSWAPCHAIN_MAX_IMG];
     for (uint32_t i = 0; i < VSWAPCHAIN_MAX_IMG; i++) {
-        cmd_buffers[i] = rvk.rcmds[i].handle;
+        cmd_buffers[i] = vk.rcmds[i].handle;
     }
-    rdev_vulkan_destroy_fences(&rvk, VSWAPCHAIN_MAX_IMG);
-    rdev_vulkan_destroy_semaphores(&rvk, VSWAPCHAIN_MAX_IMG);
-    vkFreeCommandBuffers(rvk.dev.handle, rvk.dev.cmd_pool, VSWAPCHAIN_MAX_IMG,
+    vdestroy_fences(&vk, VSWAPCHAIN_MAX_IMG);
+    vdestroy_semaphores(&vk, VSWAPCHAIN_MAX_IMG);
+    vkFreeCommandBuffers(vk.dev.handle, vk.dev.cmd_pool, VSWAPCHAIN_MAX_IMG,
                          cmd_buffers);
-    rdev_vulkan_destroy_device(&rvk);
+    vdestroy_device(&vk);
 #ifdef _DEBUG
-    rdev_vulkan_destroy_dbg_msgr(&rvk, dbg_msgr);
+    vdestroy_dbg_msgr(&vk, dbg_msgr);
 #endif  //_DEBUG
-    vkDestroyInstance(rvk.instance, rvk.allocator);
+    vkDestroyInstance(vk.instance, vk.allocator);
 }
 
 void rdev_create_swapchain(void* wnd_native, uint32_t w, uint32_t h) {
     VkResult result;
-    switch (rvk.window_api) {
+    switch (vk.window_api) {
         case RDEV_WND_WL: {
-            result = rdev_vulkan_create_surface_wl(&rvk, wnd_native);
+            result = vcreate_surface_wl(&vk, wnd_native);
         } break;
         case RDEV_WND_XCB: {
-            result = rdev_vulkan_create_surface_xcb(&rvk, wnd_native);
+            result = vcreate_surface_xcb(&vk, wnd_native);
         } break;
         case RDEV_WND_WIN32: {
-            result = rdev_vulkan_create_surface_win32(&rvk, wnd_native);
+            result = vcreate_surface_win32(&vk, wnd_native);
         } break;
     }
     debug_assert(result == VK_SUCCESS);
-    VkSurfaceFormatKHR fmt =
-        vkutil_find_surface_format(rvk.dev.physical, rvk.surface);
-    debug_log("\nFound format during creation: %d, color space %d\n", fmt.format, fmt.colorSpace);
-    VkFormat depth_fmt = vkutil_find_depth_format(rvk.dev.physical);
+    VkSurfaceFormatKHR fmt = vutl_find_surface_format(vk.dev.physical, vk.surface);
+    VkFormat           depth_fmt = vutl_find_depth_format(vk.dev.physical);
     if (depth_fmt == VK_FORMAT_UNDEFINED) {
-        debug_log("Failed to find depth format!\n");
+        debug_log("failed to find depth format!\n");
         debug_assert(0);
         return;
     }
 
-    VkPresentModeKHR present =
-        vkutil_find_present_mode(rvk.dev.physical, rvk.surface);
-    rvk.swapchain.surface_fmt = fmt;
-    rvk.swapchain.depth_fmt = depth_fmt;
-    rvk.swapchain.present_mode = present;
+    VkPresentModeKHR present = vutl_find_present_mode(vk.dev.physical, vk.surface);
+    vk.swapchain.surface_fmt = fmt;
+    vk.swapchain.depth_fmt = depth_fmt;
+    vk.swapchain.present_mode = present;
     VkExtent2D swapchain_extent = {.width = w, .height = h};
-    result = rdev_vulkan_create_swapchain(&rvk, &rvk.swapchain, swapchain_extent);
+    result = vcreate_swapchain(&vk, &vk.swapchain, swapchain_extent);
     debug_assert(result == VK_SUCCESS);
-    result = rdev_vulkan_create_swapchainpass(&rvk, &rvk.swapchain);
+    result = vcreate_swapchainpass(&vk, &vk.swapchain);
     debug_assert(result == VK_SUCCESS);
-    result = rdev_vulkan_create_framebuffers(&rvk, &rvk.swapchain);
+    result = vcreate_framebuffers(&vk, &vk.swapchain);
     debug_assert(result == VK_SUCCESS);
-    debug_log("Renderer: Swapchain created: %d, %d\n", rvk.swapchain.extent.width,
-              rvk.swapchain.extent.height);
+    debug_log("swapchain created: %d, %d\n", vk.swapchain.extent.width,
+              vk.swapchain.extent.height);
 }
 
 void rdev_resize_swapchain(uint32_t w, uint32_t h) {
-    debug_log("Renderer: Resizing swapchain: %d, %d\n", w, h);
     VkExtent2D extent = {.width = w, .height = h};
-    vkDeviceWaitIdle(rvk.dev.handle);
-    rdev_vulkan_destroy_framebuffers(&rvk, &rvk.swapchain);
-    rdev_vulkan_destroy_swapchainpass(&rvk, &rvk.swapchain);
-    rdev_vulkan_destroy_swapchain(&rvk, &rvk.swapchain);
+    vkDeviceWaitIdle(vk.dev.handle);
+    vdestroy_framebuffers(&vk, &vk.swapchain);
+    vdestroy_swapchainpass(&vk, &vk.swapchain);
+    vdestroy_swapchain(&vk, &vk.swapchain);
     VkResult result;
-    VkSurfaceFormatKHR fmt = vkutil_find_surface_format(rvk.dev.physical, rvk.surface);
-    debug_log("\nFound format during resize: %d, color space %d\n", fmt.format, fmt.colorSpace);
-    result = rdev_vulkan_create_swapchain(&rvk, &rvk.swapchain, extent);
+    result = vcreate_swapchain(&vk, &vk.swapchain, extent);
     debug_assert(result == VK_SUCCESS);
-    result = rdev_vulkan_create_swapchainpass(&rvk, &rvk.swapchain);
+    result = vcreate_swapchainpass(&vk, &vk.swapchain);
     debug_assert(result == VK_SUCCESS);
-    result = rdev_vulkan_create_framebuffers(&rvk, &rvk.swapchain);
+    result = vcreate_framebuffers(&vk, &vk.swapchain);
     debug_assert(result == VK_SUCCESS);
-    debug_log("Renderer: Swapchain resized: %d, %d\n", w, h);
+    debug_log("swapchain resized: %d, %d\n", w, h);
 }
 
 void rdev_destroy_swapchain() {
-    vkDeviceWaitIdle(rvk.dev.handle);
-    rdev_vulkan_destroy_framebuffers(&rvk, &rvk.swapchain);
-    rdev_vulkan_destroy_swapchainpass(&rvk, &rvk.swapchain);
-    rdev_vulkan_destroy_swapchain(&rvk, &rvk.swapchain);
-    vkDestroySurfaceKHR(rvk.instance, rvk.surface, rvk.allocator);
+    vkDeviceWaitIdle(vk.dev.handle);
+    vdestroy_framebuffers(&vk, &vk.swapchain);
+    vdestroy_swapchainpass(&vk, &vk.swapchain);
+    vdestroy_swapchain(&vk, &vk.swapchain);
+    vkDestroySurfaceKHR(vk.instance, vk.surface, vk.allocator);
 }
 
-rpass_id rdev_swapchain_renderpass() { return rvk.swapchain.rpass.id; }
-
-rbuf_id  rdev_create_buffer() {
-    unimplemented(rdev_create_buffer);
-    return 0;
-}
+rpass_id rdev_swapchain_renderpass() { return vk.swapchain.rpass.id; }
 
 rpass_id rdev_create_renderpass() {
     unimplemented(rdev_create_renderpass);
     return 0;
 }
 
-rpipe_id rdev_create_pipeline() {
-    unimplemented(rdev_create_pipeline);
+rpipe_id rdev_create_pipeline(rpipe_params* params) {
+    // hack:
+    vpipe* pipe = &vk.pipes[0];  // only using a single pipeline for now
+
+    uint32_t shader_count = params->shader_stage_count;
+    vshader  shaders[shader_count];
+    for (uint32_t i = 0; i < params->shader_stage_count; i++) {
+        shaders[i].type = params->shader_stages[i].type;
+        shaders[i].code = params->shader_stages[i].code;
+        shaders[i].code_size = params->shader_stages[i].code_size;
+    }
+    VkResult result;
+    result = vcreate_shader_modules(&vk, shaders, shader_count);
+    if (result != VK_SUCCESS) return RDEV_INVALID_ID;
+
+    result = vcreate_pipeline(&vk, pipe, params, shaders);
+    if (result != VK_SUCCESS) return RDEV_INVALID_ID;
+
+    vdestroy_shader_modules(&vk, shaders, params->shader_stage_count);
+    debug_log("graphics pipeline created!\n");
+    // todo:
     return 0;
 }
 
-void rdev_destroy_buffer(rbuf_id id) {
-    unimplemented(rdev_create_buffer);
-    unused(id);
+void rdev_destroy_pipeline(rpipe_id id) {
+    vkDeviceWaitIdle(vk.dev.handle);
+    vpipe pipe = vk.pipes[id];  //
+    vkDestroyPipelineLayout(vk.dev.handle, pipe.layout, vk.allocator);
+    vkDestroyPipeline(vk.dev.handle, pipe.handle, vk.allocator);
 }
 
 void rdev_destroy_renderpass(rpass_id id) {
@@ -159,9 +170,87 @@ void rdev_destroy_renderpass(rpass_id id) {
     unused(id);
 }
 
-void rdev_destroy_pipeline(rpipe_id id) {
-    unimplemented(rdev_create_renderpass);
-    unused(id);
+//=========================================================
+//
+// buffers
+//
+//=========================================================
+
+rbuffer_id rdev_create_buffer(rbuf_params* params) {
+    static uint32_t buf_count = 0;
+    vbuf*           buf = &vk.buffers[buf_count];
+    buf->id = buf_count;
+    VkResult result = vcreate_buffer(&vk, params, buf);
+    if (result != VK_SUCCESS) return RDEV_INVALID_ID;
+    buf_count++;
+    return buf->id;
+}
+
+void rdev_destroy_buffer(rbuffer_id id) {
+    vbuf buf = vk.buffers[id];
+    vdestroy_buffer(&vk, &buf);
+}
+
+void rdev_buffer_upload(rbuffer_id id, void* data, uint32_t size, uint32_t offset) {
+    vbuf* buf = &vk.buffers[id];
+    vupload_buffer(&vk, buf, data, size, offset);
+}
+
+void rdev_buffer_download(rbuffer_id id, void* data, uint32_t size, uint32_t offset) {
+    vbuf buf = vk.buffers[id];
+    vdownload_buffer(&vk, &buf, data, size, offset);
+}
+void* rdev_buffer_map(rbuffer_id id) {
+    vbuf* buf = &vk.buffers[id];
+    return vbuffer_map(&vk, buf);
+}
+void rdev_buffer_unmap(rbuffer_id id) {
+    vbuf* buf = &vk.buffers[id];
+    vbuffer_unmap(&vk, buf);
+}
+
+rbuffer_id rdev_create_vertex_buffer(uint32_t size, void* data) {
+    rbuf_params params = {
+        .size = size,
+        .usage_flags =
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .initial_data = data,
+    };
+    return rdev_create_buffer(&params);
+}
+
+rbuffer_id rdev_create_index_buffer(uint32_t size, void* data) {
+    rbuf_params params = {
+        .size = size,
+        .usage_flags =
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .initial_data = data,
+    };
+    return rdev_create_buffer(&params);
+}
+
+rbuffer_id rdev_create_uniform_buffer(uint32_t size) {
+    rbuf_params params = {
+        .size = size,
+        .usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        .memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        .initial_data = NULL,
+    };
+    return rdev_create_buffer(&params);
+}
+
+rbuffer_id rdev_create_staging_buffer(uint32_t size) {
+    rbuf_params params = {
+        .size = size,
+        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        .initial_data = NULL,
+    };
+    return rdev_create_buffer(&params);
 }
 
 //=========================================================
@@ -171,20 +260,20 @@ void rdev_destroy_pipeline(rpipe_id id) {
 //=========================================================
 
 rcmd* rdev_begin() {
-    vkWaitForFences(rvk.dev.handle, 1, &rvk.inflight_fences[rvk.current_frame],
+    vkWaitForFences(vk.dev.handle, 1, &vk.inflight_fences[vk.current_frame],
                     VK_TRUE, UINT64_MAX);
-    vkResetFences(rvk.dev.handle, 1, &rvk.inflight_fences[rvk.current_frame]);
+    vkResetFences(vk.dev.handle, 1, &vk.inflight_fences[vk.current_frame]);
     VkResult result =
-        vkAcquireNextImageKHR(rvk.dev.handle, rvk.swapchain.handle, UINT64_MAX,
-                              rvk.image_available_semaphores[rvk.current_frame],
-                              VK_NULL_HANDLE, &rvk.image_index);
+        vkAcquireNextImageKHR(vk.dev.handle, vk.swapchain.handle, UINT64_MAX,
+                              vk.image_available_semaphores[vk.current_frame],
+                              VK_NULL_HANDLE, &vk.image_index);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        debug_log("Renderer: Swapchain needs recreation!\n");
+        debug_log("swapchain needs recreation!\n");
         // Recreate swapchain here
         return 0;
     } else if (result != VK_SUCCESS) {
-        debug_log("Renderer: Image acquisition error!\n");
+        debug_log("image acquisition error!\n");
         // Handle other errors
         return 0;
     }
@@ -194,7 +283,7 @@ rcmd* rdev_begin() {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
 
-    rcmd* cmd = &rvk.rcmds[rvk.current_frame];
+    rcmd* cmd = &vk.rcmds[vk.current_frame];
 
     vkResetCommandBuffer(cmd->handle, 0);
     vkBeginCommandBuffer(cmd->handle, &begin_info);
@@ -205,14 +294,14 @@ void rdev_end(rcmd* cmd) {
     vkEndCommandBuffer(cmd->handle);
 
     VkSemaphore wait_semaphores[] = {
-        rvk.image_available_semaphores[rvk.current_frame],
+        vk.image_available_semaphores[vk.current_frame],
     };
     VkPipelineStageFlags wait_stages[] = {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     };
 
     VkSemaphore signal_semaphores[] = {
-        rvk.render_finished_semaphores[rvk.current_frame],
+        vk.render_finished_semaphores[vk.current_frame],
     };
 
     VkSubmitInfo submit_info = {
@@ -226,26 +315,26 @@ void rdev_end(rcmd* cmd) {
         .pSignalSemaphores = signal_semaphores,
     };
 
-    vkQueueSubmit(rvk.dev.graphics_queue, 1, &submit_info,
-                  rvk.inflight_fences[rvk.current_frame]);
+    vkQueueSubmit(vk.dev.graphics_queue, 1, &submit_info,
+                  vk.inflight_fences[vk.current_frame]);
 
     VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = signal_semaphores,
         .swapchainCount = 1,
-        .pSwapchains = &rvk.swapchain.handle,
-        .pImageIndices = &rvk.image_index,
+        .pSwapchains = &vk.swapchain.handle,
+        .pImageIndices = &vk.image_index,
     };
 
-    vkQueuePresentKHR(rvk.dev.graphics_queue, &present_info);
+    vkQueuePresentKHR(vk.dev.graphics_queue, &present_info);
 
-    rvk.current_frame = (rvk.current_frame + 1) % rvk.swapchain.image_count;
+    vk.current_frame = (vk.current_frame + 1) % vk.swapchain.image_count;
 };
 
 void rcmd_begin_pass(rcmd* cmd, rpass_id id) {
     // only supporting the swapchain pass for now;
-    debug_assert(id == rvk.swapchain.rpass.id);
+    debug_assert(id == vk.swapchain.rpass.id);
 
     VkClearValue clear_values[2];
     clear_values[0].color = (VkClearColorValue){{0.0941f, 0.0941f, 0.0941f, 1.0f}};
@@ -253,33 +342,72 @@ void rcmd_begin_pass(rcmd* cmd, rpass_id id) {
 
     VkRenderPassBeginInfo rp_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass = rvk.swapchain.rpass.handle,
-        .framebuffer = rvk.swapchain.framebuffers[rvk.image_index],
+        .renderPass = vk.swapchain.rpass.handle,
+        .framebuffer = vk.swapchain.framebuffers[vk.image_index],
         .renderArea =
             {
                 .offset = {0, 0},
-                .extent = rvk.swapchain.extent,
+                .extent = vk.swapchain.extent,
             },
         .clearValueCount = 2,
         .pClearValues = clear_values,
     };
     vkCmdBeginRenderPass(cmd->handle, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 }
-void rcmd_begin_pipe(rcmd* cmd, rpipe_id id);
-void rcmd_begin_vertex_buf(rcmd* cmd, rbuf_id id);
-void rcmd_begin_index_buf(rcmd* cmd, rbuf_id id);
-void rcmd_begin_descriptor_set(rcmd* cmd, rbuf_id id);
+void rcmd_bind_pipe(rcmd* cmd, rpipe_id id) {
+    // todo: rvk.pipes[id] when using multiple pipelines
+    VkViewport viewport = {
+        .x = 0,
+        .y = 0,
+        .width = vk.swapchain.extent.width,
+        .height = vk.swapchain.extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+
+    vkCmdSetViewport(cmd->handle, 0, 1, &viewport);
+    VkRect2D scissor = {
+        .offset.x = 0,
+        .offset.y = 0,
+        .extent = vk.swapchain.extent,
+    };
+    vkCmdSetScissor(cmd->handle, 0, 1, &scissor);
+    vkCmdBindPipeline(cmd->handle, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      vk.pipes[id].handle);
+}
+void rcmd_bind_vertex_buffer(rcmd* cmd, rbuffer_id id) {
+    vbuf buf = vk.buffers[id];
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd->handle, 0, 1, &buf.handle, offsets);
+}
+
+void rcmd_bind_index_buffer(rcmd* cmd, rbuffer_id id) {
+    vbuf buf = vk.buffers[id];
+    vkCmdBindIndexBuffer(cmd->handle, buf.handle, 0, VK_INDEX_TYPE_UINT32);
+}
+
+void rcmd_bind_descriptor_set(rcmd* cmd, rbuffer_id id);
 
 void rcmd_end_pass(rcmd* cmd, rpass_id id) {
-    unused(id); // todo
+    unused(id);  // todo
     vkCmdEndRenderPass(cmd->handle);
 }
-void rcmd_end_pipe(rcmd* cmd, rpipe_id id);
-void rcmd_end_vertex_buf(rcmd* cmd, rbuf_id id);
-void rcmd_end_index_buf(rcmd* cmd, rbuf_id id);
-void rcmd_end_descriptor_set(rcmd* cmd, rbuf_id id);
+
+void rcmd_push_constants(rcmd* cmd, rpipe_id id, rshader_stage_flags flags,
+                         uint32_t offset, uint32_t size, void* data) {
+    vpipe pipe = vk.pipes[id];
+    VkShaderStageFlags stage_flags = vutl_to_vulkan_shader_stage_flags(flags);
+    vkCmdPushConstants(cmd->handle, pipe.layout, stage_flags, offset, size, data);
+}
 
 void rcmd_draw(rcmd* cmd, uint32_t first_vertex, uint32_t vertex_count,
-               uint32_t first_instance, uint32_t instance_count);
-void rcmd_draw_indexed(rcmd* cmd, uint32_t instance_count, uint32_t first_instance,
-                       uint32_t first_index, uint32_t vertex_offset);
+               uint32_t first_instance, uint32_t instance_count) {
+    vkCmdDraw(cmd->handle, vertex_count, instance_count, first_vertex, first_instance);
+}
+
+void rcmd_draw_indexed(rcmd* cmd, uint32_t index_count, uint32_t instance_count,
+                       uint32_t first_index, uint32_t vertex_offset,
+                       uint32_t first_instance) {
+    vkCmdDrawIndexed(cmd->handle, index_count, instance_count, first_index,
+                     vertex_offset, first_instance);
+}

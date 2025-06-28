@@ -34,7 +34,7 @@ void  wnd_init();
 void  wnd_terminate();
 void  wnd_dispatch_events();
 void  wnd_set_title(const char* title);
-void wnd_get_size(uint32_t* w, uint32_t* h);
+void  wnd_get_size(uint32_t* w, uint32_t* h);
 void  wnd_attach_dispatcher(wnd_dispatcher* disp);
 void  wnd_open(const char* title, uint32_t w, uint32_t h);
 void* wnd_native_handle();
