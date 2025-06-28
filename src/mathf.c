@@ -74,23 +74,23 @@ vec4 v4_lerp(vec4 a, vec4 b, float t) {
                   a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t};
 }
 
-mat4 m4_identity(void) {
+mat4 mat4_identity(void) {
     mat4 result = {0};
     result.m[0] = result.m[5] = result.m[10] = result.m[15] = 1.0f;
     return result;
 }
 
-mat4 m4_translation(vec3 translation) {
-    mat4 result = m4_identity();
+mat4 mat4_translation(vec3 translation) {
+    mat4 result = mat4_identity();
     result.m[12] = translation.x;
     result.m[13] = translation.y;
     result.m[14] = translation.z;
     return result;
 }
 
-mat4 m4_rotation_x(float radians) {
+mat4 mat4_rotation_x(float radians) {
     float c = cosf(radians), s = sinf(radians);
-    mat4  result = m4_identity();
+    mat4  result = mat4_identity();
     result.m[5] = c;
     result.m[6] = s;
     result.m[9] = -s;
@@ -98,9 +98,9 @@ mat4 m4_rotation_x(float radians) {
     return result;
 }
 
-mat4 m4_rotation_y(float radians) {
+mat4 mat4_rotation_y(float radians) {
     float c = cosf(radians), s = sinf(radians);
-    mat4  result = m4_identity();
+    mat4  result = mat4_identity();
     result.m[0] = c;
     result.m[2] = -s;
     result.m[8] = s;
@@ -108,9 +108,9 @@ mat4 m4_rotation_y(float radians) {
     return result;
 }
 
-mat4 m4_rotation_z(float radians) {
+mat4 mat4_rotation_z(float radians) {
     float c = cosf(radians), s = sinf(radians);
-    mat4  result = m4_identity();
+    mat4  result = mat4_identity();
     result.m[0] = c;
     result.m[1] = s;
     result.m[4] = -s;
@@ -118,7 +118,7 @@ mat4 m4_rotation_z(float radians) {
     return result;
 }
 
-mat4 m4_perspective(float fov_radians, float aspect, float near, float far) {
+mat4 mat4_perspective(float fov_radians, float aspect, float near, float far) {
     float tanHalfFovy = tanf(fov_radians / 2.0f);
     mat4 result = {0};
 
@@ -131,13 +131,13 @@ mat4 m4_perspective(float fov_radians, float aspect, float near, float far) {
     return result;
 }
 
-mat4 m4_look_at(vec3 eye, vec3 center, vec3 up) {
+mat4 mat4_look_at(vec3 eye, vec3 center, vec3 up) {
     // Forward vector points *towards* positive Z axis (center - eye)
     vec3 f = v3_normalize(v3_sub(center, eye));  // forward (looking direction)
     vec3 s = v3_normalize(v3_cross(f, up));      // right
     vec3 u = v3_cross(s, f);                      // recalculated up vector
 
-    mat4 result = m4_identity();
+    mat4 result = mat4_identity();
 
     // Column-major order matching your projection
     result.m[0] = s.x;
@@ -164,7 +164,7 @@ mat4 m4_look_at(vec3 eye, vec3 center, vec3 up) {
     return result;
 }
 
-mat4 m4_mul(mat4 a, mat4 b) {
+mat4 mat4_mul(mat4 a, mat4 b) {
     mat4 result = {0};
     for (int col = 0; col < 4; ++col) {
         for (int row = 0; row < 4; ++row) {
