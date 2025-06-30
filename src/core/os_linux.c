@@ -117,6 +117,40 @@ int path_isfile(const char* path) {
     return S_ISREG(st.st_mode);
 }
 
+void path_fname(char* buffer, const char* path) {
+    const char* filename = path;
+    const char* p = path;
+    while (*p) {
+        if (*p == '/' || *p == '\\') {
+            filename = p + 1;
+        }
+        p++;
+    }
+    
+    const char* dot = NULL;
+    p = filename;
+    while (*p) {
+        if (*p == '.') {
+            dot = p;
+        }
+        p++;
+    }
+    
+    size_t len;
+    if (dot && dot > filename) {
+        len = dot - filename;
+    } else {
+        len = strlen(filename);
+    }
+    
+    if (len >= OS_MAX_PATH) {
+        len = OS_MAX_PATH - 1;
+    }
+    
+    // Copy and null terminate
+    memcpy((void*)buffer, filename, len);
+    buffer[len] = '\0';
+}
 const char* path_dirname(char* path) { return dirname(path); }
 
 const char* path_basename(const char* path) {
@@ -203,7 +237,7 @@ int env_set(const char* name, const char* value) {
     return setenv(name, value, 1) == 0;
 }
 
-uint64_t os_time_msec(void) { return os_time_usec() * ONE_OVER_ONE_THOUSAND; }
+uint64_t os_time_msec(void) { return os_time_usec() / ONE_THOUSAND; }
 
 uint64_t os_time_usec(void) {
     struct timeval tv;
@@ -221,7 +255,7 @@ int os_pid(void) {
  return getpid();    
 }
 
-int os_exec(char* const* args) {
+int os_exec(const char** args) {
     if (args == NULL || args[0] == NULL) {
         return 1;
     }
@@ -230,7 +264,7 @@ int os_exec(char* const* args) {
         return 1;
     } else if (pid == 0) {
         const char* arg0 = args[0];
-        execvp(arg0, args);
+        execvp(arg0, (char* const*)args);
 
         if (errno == ENOENT) {
             exit(CMD_NOT_FOUND);  // Command not found
