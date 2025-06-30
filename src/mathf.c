@@ -1,6 +1,6 @@
 #include "mathf.h"
 
-#include "math.h"
+#include <math.h>
 
 float deg2rad(float degrees) { return degrees * (PI / 180.0f); }
 float rad2deg(float radians) { return radians * (180.0f / PI); }

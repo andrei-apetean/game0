@@ -1,5 +1,5 @@
 #pragma once
-#include "core/mem.h"
+#include "../core/mem.h"
 
 typedef uint32_t rbuffer_id;
 typedef uint32_t rpass_id;
@@ -14,9 +14,9 @@ typedef enum {
 } rdev_wnd;
 
 typedef struct {
-    rdev_wnd           wnd_api;
-    scratch_allocator* scratch_allocator;
-    allocator*         allocator;
+    rdev_wnd   wnd_api;
+    allocator* scratch_allocator;
+    allocator* allocator;
 } rdev_params;
 
 // ==============================================================

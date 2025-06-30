@@ -2,9 +2,9 @@
 
 #include <vulkan/vulkan_core.h>
 
-#include "base.h"
+#include "../base.h"
 #include "rdev_vulkan.h"
-#include "render/vkutils.h"
+#include "vkutils.h"
 #include "rtypes.h"
 
 #if _DEBUG

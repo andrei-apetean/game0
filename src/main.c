@@ -361,14 +361,3 @@ rshader_stage read_shader(const char* path, rshader_type type) {
     return result;
 }
 
-#include "base.c"
-#include "camera.c"
-#include "core/mem.c"
-#include "core/wnd.c"
-#include "core/wnd_wl.c"
-#include "mathf.c"
-#include "render/rdev.c"
-#include "render/rdev_vulkan.c"
-#include "render/rdev_vulkan_wl.c"
-#include "render/vkutils.c"
-#include "time_posix.c"

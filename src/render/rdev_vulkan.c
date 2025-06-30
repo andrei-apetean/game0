@@ -2,10 +2,9 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <vulkan/vulkan_core.h>
 
-#include "base.h"
-#include "render/rtypes.h"
+#include "../base.h"
+#include "rtypes.h"
 #include "vkutils.h"
 
 #define VULKAN_SURFACE_EXT "VK_KHR_surface"

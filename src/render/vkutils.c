@@ -1,4 +1,3 @@
-#pragma once
 #include "vkutils.h"
 
 #include <stddef.h>
@@ -7,8 +6,8 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
-#include "base.h"
-#include "render/rtypes.h"
+#include "../base.h"
+#include "rtypes.h"
 
 // todo: move in platform specific
 VkBool32 vutl_present_supported_xcb(VkPhysicalDevice d, uint32_t family) {
