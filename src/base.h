@@ -14,10 +14,6 @@
     #define GAME0_LINUX 0
 #endif
 
-#define mkilo(bytes) bytes * 1024
-#define mmega(bytes) bytes * 1024 * 1024
-#define mgiga(bytes) bytes * 1024 * 1024 * 1024
-
 #define unused(x) (void)(x)
 
 void debug_log(const char* fmt, ...);

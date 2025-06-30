@@ -3,21 +3,44 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct scratch_allocator scratch_allocator;
+#define mkilo(bytes) (bytes) * 1024 
+#define mmega(bytes) (bytes) * 1024 * 1024
+#define mgiga(bytes) (bytes) * 1024 * 1024 * 1024
+
+typedef enum  {
+    ALLOCATOR_TYPE_STACK,
+    ALLOCATOR_TYPE_HEAP,
+    ALLOCATOR_TYPE_MAX_ENUM,
+} allocator_type;
+
+typedef enum {
+    MEM_TAG_CORE = 0,
+    MEM_TAG_RENDERER,
+    MEM_TAG_MAX_ENUM
+} mem_tag;
+
 typedef struct allocator allocator;
 
-void mem_init(void);
-void mem_term(void);
-allocator* mem_allocator();
-scratch_allocator* mem_scratch_allocator();
+typedef struct {
+    void* (*alloc)(allocator* allocator, size_t size, size_t align);
+    void (*free)(allocator* allocator, void* ptr);
+    void (*reset)(allocator* allocator);
+    void (*get_info)(allocator* allocator, size_t* used, size_t* total);
+    void (*destroy)(allocator* allocator);
+} allocfn;
 
-scratch_allocator* scratch_init(size_t bytes);
-void*  scratch_alloc(scratch_allocator* ator, size_t bytes, size_t align);
-size_t scratch_mark(scratch_allocator* ator);
-void   scratch_restore(scratch_allocator* ator, size_t marker);
-void   scratch_reset(scratch_allocator* ator);
+struct allocator {
+    allocfn*       fn;
+    allocator_type type;
+    mem_tag        tag;
+    void*          data;
+};
 
-allocator* allocator_init(size_t bytes);
-void* allocator_alloc(allocator* allocator, size_t bytes, size_t align);
-void allocator_free(allocator* allocator, void* ptr);
+#define aalloc(ator, size) ((ator)->fn->alloc((ator), (size), 8))
+#define aalloc_algn(ator, size, align) ((ator)->fn->alloc((ator), (size), (align))))
+#define afree(ator, ptr) ((ator)->fn->free((ator), (ptr)))
+#define areset(ator, size) ((ator)->fn->reset((ator)))
+#define aget_info(ator, used, total) ((ator)->fn->get_info((ator), (used), (total)))
+#define adestroy(ator) ((ator)->fn->destroy((ator)))
 
+allocator* allocator_create(allocator_type type, mem_tag tag, size_t size);

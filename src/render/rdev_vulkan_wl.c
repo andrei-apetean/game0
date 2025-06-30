@@ -1,5 +1,5 @@
 #include <wayland-client-core.h>
-#include "base.h"
+#include "../base.h"
 #include "rdev_vulkan.h"
 
 #ifdef GAME0_LINUX

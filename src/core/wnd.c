@@ -1,6 +1,6 @@
 #include "wnd.h"
 
-#include "base.h"
+#include "../base.h"
 #include "wnd_backend.h"
 
 static wnd_api wnd = {0};

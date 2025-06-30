@@ -1,7 +1,7 @@
 #pragma once
 #include <vulkan/vulkan.h>
 
-#include "render/rtypes.h"
+#include "rtypes.h"
 
 #define VSWAPCHAIN_MAX_IMG 3
 #define VBUF_MAX_COUNT 128
