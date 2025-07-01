@@ -3,20 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#define OS_WIN32
-#define OS_PATH_SEP "\\"
-#define OS_EXE_EXT ".exe"
-#elif defined(__linux__)
-#define OS_LINUX
-#define OS_PATH_SEP "/"
-#define OS_EXE_EXT ""
-#else
-#error "unsupported platform"
-#endif
-
-#define OS_MAX_PATH 256
-
 int      file_exists(const char* path);
 int      file_delete(const char* path);
 int      file_copy(const char* from, const char* to);

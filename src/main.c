@@ -5,13 +5,13 @@
 
 #include "base.h"
 #include "camera.h"
+#include "core/os.h"
 #include "core/os_event.h"
 #include "core/wnd.h"
 #include "math_types.h"
 #include "mathf.h"
 #include "render/rdev.h"
 #include "render/rtypes.h"
-#include "time_util.h"
 
 typedef struct {
     float x, y, z;
@@ -40,7 +40,7 @@ static float    slow_speed = 1.0f;
 static uint32_t is_running = 0;
 static uint32_t needs_resize = 0;
 static uint32_t fps_frame_count;
-static uint32_t window_width = 1920;
+static uint32_t window_width = 1080;
 static uint32_t window_height = 720;
 static camera   cam;
 
@@ -160,7 +160,6 @@ int main(void) {
     debug_log("Initializing...\n");
 
     wnd_init();
-    time_init();
     uint32_t    window_api = wnd_backend_id();
     rdev_params rparams = {
         .wnd_api = window_api,
@@ -182,9 +181,8 @@ int main(void) {
     void* wnd_native = wnd_native_handle();
     wnd_get_size(&window_width, &window_height);
     rdev_create_swapchain(wnd_native, window_width, window_height);
-    time_p last_time;
 
-    double elapsed;
+   
     is_running = 1;
     needs_resize = 0;
     rpass_id swapchain_pass = rdev_swapchain_renderpass();
@@ -246,27 +244,27 @@ int main(void) {
         return -1;
     }
 
-    cam = camera_create_fps((vec3){0, 0, 5}, 45.0f * PI / 180.0f,
+    cam = camera_create_fps((vec3){0, 0, 5}, 45.0f * M_PI / 180.0f,
                             (float)window_width / window_height, 0.1f, 100.0f);
-
-    time_p last_frame;
+    uint64_t last_frame = os_time_usec();
+    double elapsed = 0;
     double delta_time = 0;
 
     while (is_running) {
         wnd_dispatch_events();
 
-        time_p now = time_now();
+        uint64_t now = os_time_usec();
         fps_frame_count++;
 
-        elapsed = time_diff_sec(last_time, now);
-        delta_time = time_diff_sec(last_frame, now);
+        delta_time = (double)(now-last_frame)/1000000;
+        elapsed += delta_time;
         last_frame = now;
         if (elapsed >= 1.0) {
             char title[128] = {0};
             sprintf(title, "game_0 - %d fps", fps_frame_count);
             wnd_set_title(title);
             fps_frame_count = 0;
-            last_time = now;
+            elapsed = 0;
         }
 
         // Determine movement speed
@@ -293,6 +291,7 @@ int main(void) {
         mat4 mvp = camera_mvp_matrix(&cam, &model);
 
         rcmd* cmd = rdev_begin();
+        if (!cmd) continue;
         rcmd_begin_pass(cmd, swapchain_pass);
         rcmd_bind_pipe(cmd, pipeline);
         rcmd_push_constants(cmd, pipeline, RSHADER_STAGE_VERTEX, 0, sizeof(mat4),

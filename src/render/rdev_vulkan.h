@@ -99,6 +99,7 @@ typedef struct {
     rdev_wnd               window_api;
     uint32_t               image_index;
     uint32_t               current_frame;
+    uint32_t               swapchain_needs_resize;
 } vstate;
 
 //=========================================================

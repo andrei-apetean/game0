@@ -1,7 +1,5 @@
 #include "rdev.h"
 
-#include <vulkan/vulkan_core.h>
-
 #include "../base.h"
 #include "rdev_vulkan.h"
 #include "vkutils.h"
@@ -15,6 +13,8 @@ static vstate vk = {0};
 
 void rdev_init(rdev_params* params) {
     debug_log("initializing rdev...\n");
+    debug_log("window api: %d\n", params->wnd_api);
+    
     VkResult result = VK_SUCCESS;
     vk.window_api = params->wnd_api;
     vcreate_instance(&vk);
@@ -117,6 +117,7 @@ void rdev_resize_swapchain(uint32_t w, uint32_t h) {
     result = vcreate_framebuffers(&vk, &vk.swapchain);
     debug_assert(result == VK_SUCCESS);
     debug_log("swapchain resized: %d, %d\n", w, h);
+    vk.swapchain_needs_resize = 0;
 }
 
 void rdev_destroy_swapchain() {
@@ -260,6 +261,9 @@ rbuffer_id rdev_create_staging_buffer(uint32_t size) {
 //=========================================================
 
 rcmd* rdev_begin() {
+    if (vk.swapchain_needs_resize) {
+        return 0;
+    }
     vkWaitForFences(vk.dev.handle, 1, &vk.inflight_fences[vk.current_frame],
                     VK_TRUE, UINT64_MAX);
     vkResetFences(vk.dev.handle, 1, &vk.inflight_fences[vk.current_frame]);
@@ -270,7 +274,7 @@ rcmd* rdev_begin() {
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         debug_log("swapchain needs recreation!\n");
-        // Recreate swapchain here
+        vk.swapchain_needs_resize = 1;
         return 0;
     } else if (result != VK_SUCCESS) {
         debug_log("image acquisition error!\n");

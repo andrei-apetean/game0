@@ -1,9 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "./src/core/os.h"
+#include "./src/core/os_defines.h"
+
+#if defined(OS_WIN32)
+#define strdup _strdup
+#endif
 
 #define COMPILER "clang"
 #define BIN_DIR "./bin"
@@ -16,8 +20,8 @@
 #define MAX_COMPILE_FLAGS 1024
 #define MAX_FOLDER_DEPTH 256
 
-static char g_vulkan_include[OS_MAX_PATH];
-static char g_vulkan_link[OS_MAX_PATH];
+static char g_vulkan_inc_path[OS_MAX_PATH];
+static char g_vulkan_lib_path[OS_MAX_PATH];
 static char g_vulkan_glslc[OS_MAX_PATH];
 
 typedef int (*build_hook)();
@@ -28,44 +32,31 @@ typedef struct {
 } dir_info;
 
 typedef enum {
-    LIB_ID_VULKAN = 0,
-    LIB_ID_MATH,
+    F_INC_PATH_VULKAN = 0,
+    F_INC_PATH_PROGRAM,
+    F_INC_PATH_EXTERNAL,
 
-#ifdef OS_LINUX
-    LIB_ID_WAYLAND,
-#endif  // OS_LINUX
+    F_DEFINE_DEBUG,
+    F_DEFINE_CRT_SECURE_NO_WRN,
 
-    LIB_ID_COUNT,
-} lib_id;
-
-typedef enum {
-    LINK_ID_VULKAN = 0,
-    LINK_ID_COUNT,
-} link_id;
+    F_FLAG_O2,
+    F_FLAG_DBG_SYM,
+    CFLAGS_COUNT,
+} cflags;
 
 typedef enum {
-    INCLUDE_ID_VULKAN = 0,
-    INCLUDE_ID_PROGRAM,
-    INCLUDE_ID_EXTERNAL,
-    INCLUDE_ID_COUNT,
-} include_id;
+    L_LIB_VULKAN = 0,
+    L_LIB_WAYLAND,
+    L_LIB_MATH,
+    L_LIB_USER32,
 
-typedef enum {
-    DEFINE_ID_DEBUG = 0,
-    DEFINE_ID_COUNT,
-} define_id;
-
-typedef enum {
-    FLAG_ID_O2 = 0,
-    FLAG_ID_GSYMBOLS,
-    FLAG_ID_COUNT,
-} flag_id;
+    L_LIB_PATH_VULKAN,
+    LFLAGS_COUNT,
+} lflags;
 
 typedef enum {
     MODULE_ID_PROGRAM = 0,
-#ifdef OS_LINUX
     MODULE_ID_XDG_SHELL,
-#endif  // OS_LINUX
     MODULE_ID_COUNT
 } module_id;
 
@@ -77,13 +68,11 @@ typedef enum {
 typedef struct {
     char*      name;
     char*      src_dir;
-    int        flags[FLAG_ID_COUNT];
-    int        libs[LIB_ID_COUNT];
-    int        includes[INCLUDE_ID_COUNT];
-    int        defines[DEFINE_ID_COUNT];
-    int        links[LINK_ID_COUNT];
+    int        flags_count;
     build_hook pre_build;
     build_hook post_build;
+    cflags     cflags[CFLAGS_COUNT];
+    lflags     lflags[LFLAGS_COUNT];
 } module_info;
 
 typedef enum {
@@ -97,29 +86,25 @@ typedef struct {
     module_id modules[MODULE_ID_COUNT];
 } artifact_info;
 
-static char* g_libs[LIB_ID_COUNT] = {
-    "-lvulkan",
-    "-lm",
-    "-lwayland-client",
+static char* g_cflags[CFLAGS_COUNT] = {
+    [F_INC_PATH_PROGRAM] = "-I./src",
+    [F_INC_PATH_EXTERNAL] = "-I./external",
+    [F_DEFINE_DEBUG] = "-D_DEBUG",
+    [F_DEFINE_CRT_SECURE_NO_WRN] = "-D_CRT_SECURE_NO_WARNINGS",
+    [F_FLAG_O2] = "-O2",
+    [F_FLAG_DBG_SYM] = "-g",
 };
 
-static char* g_links[LINK_ID_COUNT] = {
-    NULL,  // vulkan, reserved - will populate at runtime
-};
+static char* g_lflags[LFLAGS_COUNT] = {
+#ifdef OS_LINUX
+    [L_LIB_VULKAN] = "-lvulkan",
+#else
+    [L_LIB_VULKAN] = "-lvulkan-1",
 
-static char* g_includes[INCLUDE_ID_COUNT] = {
-    NULL,  // vulkan, reserved - will populate at runtime
-    "-I./src",
-    "-I./external",
-};
-
-static char* g_defines[DEFINE_ID_COUNT] = {
-    "-D_DEBUG",
-};
-
-static char* g_flags[FLAG_ID_COUNT] = {
-    "-o2",
-    "-g",
+#endif
+    [L_LIB_MATH] = "-lm",
+    [L_LIB_WAYLAND] = "-lwayland-client",
+    [L_LIB_USER32] = "-luser32",
 };
 
 static int xdg_shell_prebuild();
@@ -129,27 +114,33 @@ static module_info g_module_infos[MODULE_ID_COUNT] = {
     {
         .src_dir = "./src",
         .name = "program",
-        .includes[INCLUDE_ID_VULKAN] = 1,
-        .includes[INCLUDE_ID_PROGRAM] = 1,
-        .includes[INCLUDE_ID_EXTERNAL] = 1,
-
-        .links[LINK_ID_VULKAN] = 1,
-
-        .libs[LIB_ID_VULKAN] = 1,
-        .libs[LIB_ID_MATH] = 1,
+        .cflags =
+            {
+                [F_INC_PATH_PROGRAM] = 1,
+                [F_INC_PATH_VULKAN] = 1,
+                [F_INC_PATH_EXTERNAL] = 1,
+                [F_DEFINE_CRT_SECURE_NO_WRN] = 1,
+            },
+        .lflags =
+            {
+                [L_LIB_VULKAN] = 1,
+                [L_LIB_PATH_VULKAN] = 1,
 #ifdef OS_LINUX
-        .libs[LIB_ID_WAYLAND] = 1,
+                [L_LINK_WAYLAND] = 1,
+                [L_LIB_WAYLAND] = 1,
+                [L_LIB_MATH] = 1,
+#else
+                [L_LIB_USER32] = 1,
+
 #endif  // OS_LINUX
-        // flags and defines will be assigned based on user input
+            },
         .pre_build = program_prebuild,
     },
-#ifdef OS_LINUX
     {
         .name = "xdg-shell",
         .src_dir = "./external/wayland",
         .pre_build = xdg_shell_prebuild,
     },
-#endif
 };
 
 static artifact_info g_artifacts[ARTIFACT_ID_COUNT] = {
@@ -235,18 +226,18 @@ int main(int argc, char** argv) {
 static int setup_vulkan_paths(void) {
     char* vulkan_sdk = os_getenv("VULKAN_SDK");
     if (!vulkan_sdk) {
-        printf("Error: $VULKAN_SDK is not set\n");
+        printf("error: $VULKAN_SDK is not set\n");
         return -1;
     }
 
-    snprintf(g_vulkan_include, OS_MAX_PATH, "-I%s" OS_PATH_SEP "include",
+    snprintf(g_vulkan_inc_path, OS_MAX_PATH, "-I%s" OS_PATH_SEP "include",
              vulkan_sdk);
-    snprintf(g_vulkan_link, OS_MAX_PATH, "-L%s" OS_PATH_SEP "lib", vulkan_sdk);
+    snprintf(g_vulkan_lib_path, OS_MAX_PATH, "-L%s" OS_PATH_SEP "lib", vulkan_sdk);
     snprintf(g_vulkan_glslc, OS_MAX_PATH,
              "%s" OS_PATH_SEP "bin" OS_PATH_SEP "glslc" OS_EXE_EXT, vulkan_sdk);
 
-    g_includes[INCLUDE_ID_VULKAN] = g_vulkan_include;
-    g_links[LINK_ID_VULKAN] = g_vulkan_link;
+    g_cflags[F_INC_PATH_VULKAN] = g_vulkan_inc_path;
+    g_lflags[L_LIB_PATH_VULKAN] = g_vulkan_lib_path;
 
     return 0;
 }
@@ -293,6 +284,10 @@ void print_usage(const char* prog) {
 int bootstrap(int argc, char** argv) {
     const char* build_exe = argv[0];
     const char* build_src = __FILE__;
+    
+    char old_exe[OS_MAX_PATH];
+    snprintf(old_exe, sizeof(old_exe), "%s.old", build_exe);
+    file_delete(old_exe);
 
     uint64_t exe_time = file_modtime(build_exe);
     uint64_t src_time = file_modtime(build_src);
@@ -301,25 +296,22 @@ int bootstrap(int argc, char** argv) {
         return 0;
     }
 
-    printf("\n=== bootstrapping: build script is outdated ===\n");
-    char temp_exe[OS_MAX_PATH];
-    snprintf(temp_exe, sizeof(temp_exe), "%s.tmp.%d", build_exe, os_pid());
-
-    const char* rebuild_cmd[] = {COMPILER, "-o", temp_exe, build_src, NULL};
+    printf("\nbuild is outdated - bootstrapping...\n");
+    
+    if (!file_rename(build_exe, old_exe)) {
+        printf("error: failed to replace executable %s -> %s\n", build_exe, old_exe);
+        file_delete(old_exe);
+        return 1;
+    }
+    const char* rebuild_cmd[] = {COMPILER, "-o", build_exe, build_src, NULL};
 
     int status = os_exec(rebuild_cmd);
     if (status != 0) {
         printf("error: bootstrap rebuild failed (exit code %d)\n", status);
-        file_delete(temp_exe);
+        file_rename(old_exe, build_exe);
         return 1;
     }
-
-    if (!file_rename(temp_exe, build_exe)) {
-        printf("error: failed to replace executable\n");
-        file_delete(temp_exe);
-        return 1;
-    }
-
+    
     printf("bootstrap successful - executing...\n\n");
     const char* cmd[argc + 1];
     for (int i = 0; i < argc; i++) {
@@ -337,9 +329,9 @@ int compile_module(module_info* module, build_mode mode, int* obj_count) {
     if (module->pre_build) {
         if (module->pre_build() != 0) return 1;
     }
-    module->flags[FLAG_ID_O2] = mode == BUILD_MODE_RELEASE;
-    module->flags[FLAG_ID_GSYMBOLS] = mode == BUILD_MODE_DEBUG;
-    module->defines[DEFINE_ID_DEBUG] = mode == BUILD_MODE_DEBUG;
+    module->cflags[F_FLAG_O2] = mode == BUILD_MODE_RELEASE;
+    module->cflags[F_FLAG_DBG_SYM] = mode == BUILD_MODE_DEBUG;
+    module->cflags[F_DEFINE_DEBUG] = mode == BUILD_MODE_DEBUG;
 
     const char* cc[MAX_COMPILE_FLAGS] = {0};
 
@@ -352,19 +344,9 @@ int compile_module(module_info* module, build_mode mode, int* obj_count) {
     idx++;
     cc[idx++] = "-o";
     idx++;
-    for (int i = 0; i < INCLUDE_ID_COUNT; i++) {
-        if (module->includes[i]) {
-            cc[idx++] = g_includes[i];
-        }
-    }
-    for (int i = 0; i < FLAG_ID_COUNT; i++) {
-        if (module->flags[i]) {
-            cc[idx++] = g_flags[i];
-        }
-    }
-    for (int i = 0; i < DEFINE_ID_COUNT; i++) {
-        if (module->defines[i]) {
-            cc[idx++] = g_defines[i];
+    for (int i = 0; i < CFLAGS_COUNT; i++) {
+        if (module->cflags[i]) {
+            cc[idx++] = g_cflags[i];
         }
     }
 
@@ -381,7 +363,7 @@ static int compile_directory(module_info* module, const char** cc, int input_idx
         printf("error: cannot open directory '%s'\n", module->src_dir);
         return 1;
     }
-    strcpy(stack[top].path, module->src_dir);
+    strcpy_s(stack[top].path, OS_MAX_PATH, module->src_dir);
 
     char ifile[OS_MAX_PATH];
 
@@ -399,7 +381,7 @@ static int compile_directory(module_info* module, const char** cc, int input_idx
             if (top + 1 < MAX_FOLDER_DEPTH) {
                 top++;
                 stack[top].iter = dir_open(ifile);
-                strcpy(stack[top].path, ifile);
+                strcpy_s(stack[top].path, OS_MAX_PATH, ifile);
             }
             continue;
         }
@@ -416,7 +398,7 @@ static int compile_directory(module_info* module, const char** cc, int input_idx
 
         char   basename[128];
         size_t len = dot - filename;
-        strncpy(basename, filename, len);
+        strncpy_s(basename, OS_MAX_PATH, filename, len);
         basename[len] = '\0';
 
         char ofile[OS_MAX_PATH];
@@ -425,13 +407,15 @@ static int compile_directory(module_info* module, const char** cc, int input_idx
         uint64_t imod = file_modtime(ifile);
         uint64_t omod = file_modtime(ofile);
 
-        if (imod <= omod) { 
+        if (imod <= omod) {
             continue;
         }
 
         cc[input_idx] = ifile;
         cc[output_idx] = ofile;
-
+        // for (int i = 0; cc[i]; i++) {
+        //     printf("%s ", cc[i]);
+        // }
         printf("  %s.o\n", basename);
 
         int status = os_exec(cc);
@@ -448,7 +432,7 @@ static int compile_directory(module_info* module, const char** cc, int input_idx
 }
 
 int build_artifact(artifact_info* artifact, build_mode mode) {
-    printf("=== building artifact '%s' (%s mode) ===\n", artifact->name,
+    printf("building artifact '%s' (%s mode)\n", artifact->name,
            mode == BUILD_MODE_DEBUG ? "debug" : "release");
 
     int total_obj_count = 0;
@@ -461,9 +445,9 @@ int build_artifact(artifact_info* artifact, build_mode mode) {
         if (!dir_exists(obj_dir)) {
             dir_create_recurse(obj_dir);
         }
-        module->flags[FLAG_ID_O2] = mode == BUILD_MODE_RELEASE;
-        module->flags[FLAG_ID_GSYMBOLS] = mode == BUILD_MODE_DEBUG;
-        module->defines[DEFINE_ID_DEBUG] = mode == BUILD_MODE_DEBUG;
+        module->cflags[F_FLAG_O2] = mode == BUILD_MODE_RELEASE;
+        module->cflags[F_FLAG_DBG_SYM] = mode == BUILD_MODE_DEBUG;
+        module->cflags[F_FLAG_O2] = mode == BUILD_MODE_DEBUG;
         printf("compiling module '%s'\n", module->name);
         if (compile_module(module, mode, &total_obj_count) != 0) {
             return 1;
@@ -481,29 +465,24 @@ int link_artifact(artifact_info* artifact) {
     const char* linker_cmd[MAX_COMPILE_FLAGS] = {0};
     int         idx = 0;
     char        out_path[128];
-    snprintf(out_path, 128, "%s" OS_PATH_SEP "%s", BIN_DIR, artifact->name);
+    snprintf(out_path, 128, "%s" OS_PATH_SEP "%s" OS_EXE_EXT, BIN_DIR,
+             artifact->name);
     linker_cmd[idx++] = COMPILER;
     linker_cmd[idx++] = "-o";
     linker_cmd[idx++] = out_path;
+    int links_added[LFLAGS_COUNT] = {0};
 
-    int libs_added[LIB_ID_COUNT] = {0};
-    int links_added[LINK_ID_COUNT] = {0};
-
-    for (int mod_idx = 0; mod_idx < artifact->module_count; mod_idx++) {
-        module_info* module = &g_module_infos[artifact->modules[mod_idx]];
-
-        for (int i = 0; i < LIB_ID_COUNT; i++) {
-            if (module->libs[i] && !libs_added[i]) {
-                linker_cmd[idx++] = g_libs[i];
-                libs_added[i] = 1;
+    for (int i = 0; i < artifact->module_count; i++) {
+        for (int j = 0; j < LFLAGS_COUNT; j++) {
+            if (g_module_infos[artifact->modules[i]].lflags[j] && !links_added[j]) {
+                links_added[j] = 1;
             }
         }
+    }
 
-        for (int i = 0; i < LINK_ID_COUNT; i++) {
-            if (module->links[i] && !links_added[i] && g_links[i]) {
-                linker_cmd[idx++] = g_links[i];
-                links_added[i] = 1;
-            }
+    for (int i = 0; i < LFLAGS_COUNT; i++) {
+        if (links_added[i]) {
+            linker_cmd[idx++] = g_lflags[i];
         }
     }
 
@@ -516,10 +495,14 @@ int link_artifact(artifact_info* artifact) {
             return 1;
         }
     }
+        // for (int i = 0; linker_cmd[i]; i++) {
+        //     printf("%s ", linker_cmd[i]);
+        // }
+        // printf("\n");
 
     int status = os_exec(linker_cmd);
     if (status != 0) {
-        printf("Error: Linking failed (exit code %d)\n", status);
+        printf("error: linking failed (exit code %d)\n", status);
         return 1;
     }
 
@@ -646,7 +629,7 @@ static int find_xdg_shell_xml(const char* protocols_dir, char* output_path) {
     if (!stack[top].iter) {
         return 1;
     }
-    strcpy(stack[top].path, protocols_dir);
+    strcpy_s(stack[top].path, OS_MAX_PATH, protocols_dir);
 
     char path[OS_MAX_PATH];
 
@@ -664,13 +647,13 @@ static int find_xdg_shell_xml(const char* protocols_dir, char* output_path) {
             if (top + 1 < MAX_FOLDER_DEPTH) {
                 top++;
                 stack[top].iter = dir_open(path);
-                strcpy(stack[top].path, path);
+                strcpy_s(stack[top].path, OS_MAX_PATH, path);
             }
             continue;
         }
 
         if (strcmp(entry, "xdg-shell.xml") == 0) {
-            strcpy(output_path, path);
+            strcpy_s(output_path, OS_MAX_PATH, path);
             // Clean up remaining iterators
             while (top >= 0) {
                 dir_close(stack[top].iter);
@@ -683,4 +666,10 @@ static int find_xdg_shell_xml(const char* protocols_dir, char* output_path) {
     return 1;  // Not found
 }
 
+#if defined(OS_LINUX)
 #include "./src/core/os_linux.c"
+#elif defined(OS_WIN32)
+#include "./src/core/os_win32.c"
+#else
+#error "unsupported os"
+#endif

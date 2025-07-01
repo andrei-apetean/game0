@@ -1,7 +1,7 @@
 #pragma once 
 #include "math_types.h"
 
-#define PI 3.14159265358979323846
+#define M_PI 3.14159265358979323846
 #define HALF_PI PI / 2
 #define TWO_PI PI * 2
 

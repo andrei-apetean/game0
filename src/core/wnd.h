@@ -2,8 +2,7 @@
 
 #include <stdint.h>
 
-
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64) || defined(__WIN32__) ||  defined(__TOS_WIN__) || defined(__WINDOWS__)
 #define WINDOW_BACKEND_WIN32
 #elif defined(__linux__)
 #define WINDOW_BACKEND_LINUX

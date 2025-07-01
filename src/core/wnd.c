@@ -7,15 +7,18 @@ static wnd_api wnd = {0};
 static uint8_t is_initialized = 0;
 
 void wnd_init() {
-#ifdef WINDOW_BACKEND_LINUX
+#if defined(WINDOW_BACKEND_LINUX)
     load_wnd_wl(&wnd);
     wnd.init();
     is_initialized = 1;
-    debug_log("Window initialized\n");
-
-#else
+#elif defined(WINDOW_BACKEND_WIN32)
+    load_wnd_win32(&wnd);
+    wnd.init();
+    is_initialized = 1;
+#else 
 #error "Unimplemented window backend!"
 #endif  // WINDOW_BACKEND_LINUX
+    debug_log("Window initialized\n");
 }
 
 void wnd_terminate() {

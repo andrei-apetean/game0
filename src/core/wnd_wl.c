@@ -1,9 +1,10 @@
-#include "../base.h"
-#include "os_event.h"
 #include "wnd.h"
-#include "wnd_backend.h"
 
 #ifdef WINDOW_BACKEND_LINUX
+#include "../base.h"
+#include "os_event.h"
+#include "wnd_backend.h"
+
 #include <fcntl.h>
 #include <string.h>
 #include <sys/mman.h>

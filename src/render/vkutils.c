@@ -13,12 +13,7 @@
 VkBool32 vutl_present_supported_xcb(VkPhysicalDevice d, uint32_t family) {
     unused(d);
     unused(family);
-    return VK_FALSE;
-}
-
-VkBool32 vutl_present_supported_win32(VkPhysicalDevice d, uint32_t family) {
-    unused(d);
-    unused(family);
+    unimplemented(vutl_present_supported_xcb)
     return VK_FALSE;
 }
 

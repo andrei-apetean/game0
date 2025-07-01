@@ -2,8 +2,8 @@
 
 #include <math.h>
 
-float deg2rad(float degrees) { return degrees * (PI / 180.0f); }
-float rad2deg(float radians) { return radians * (180.0f / PI); }
+float deg2rad(float degrees) { return degrees * (M_PI / 180.0f); }
+float rad2deg(float radians) { return radians * (180.0f / M_PI); }
 
 vec2  v2_add(vec2 a, vec2 b) { return (vec2){a.x + b.x, a.y + b.y}; }
 vec2  v2_sub(vec2 a, vec2 b) { return (vec2){a.x - b.x, a.y - b.y}; }

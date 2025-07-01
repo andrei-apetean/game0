@@ -14,8 +14,12 @@ typedef struct {
     uint32_t (*backend_id)();
 } wnd_api;
 
-#ifdef WINDOW_BACKEND_LINUX
+#if defined( WINDOW_BACKEND_LINUX)
 
 void load_wnd_wl(wnd_api* api);
+
+#elif defined(WINDOW_BACKEND_WIN32) 
+
+void load_wnd_win32(wnd_api* api);
 
 #endif  //  WINDOW_BACKEND_LINUX

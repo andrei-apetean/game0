@@ -1,6 +1,9 @@
 -I./external
 -I./src
+-IC:\VulkanSDK\1.3.283.0\Include
 -Wall
 -Wextra
 -Werror
+-D_CRT_SECURE_NO_WARNINGS
 -D_DEBUG
+-DOS_WIN32

@@ -85,6 +85,7 @@ VkResult vcreate_device(vstate* v) {
         VkPhysicalDevice devices[pdev_count];
         device_info      infos[pdev_count];
         result = vkEnumeratePhysicalDevices(v->instance, &pdev_count, devices);
+        debug_log("found %d devices on the system\n", pdev_count);
         if (result != VK_SUCCESS) return result;
         const char* extensions[] = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -96,9 +97,14 @@ VkResult vcreate_device(vstate* v) {
             vkGetPhysicalDeviceProperties(devices[i], &infos[i].properties);
             vkGetPhysicalDeviceFeatures(devices[i], &infos[i].features);
             vkGetPhysicalDeviceMemoryProperties(devices[i], &infos[i].mem_props);
-
+            
             infos[i].extension_support =
                 vutl_extensions_supported(devices[i], extensions, extension_count);
+            debug_log("evaluating device: %s\n", infos[i].properties.deviceName);
+            debug_log("extension support: %s\n", infos[i].extension_support ? "true" : "false");
+            debug_log("graphics | compute | tranfer\n");
+            debug_log("   %d     |   %d     |   %d\n", infos[i].families.graphics,
+                      infos[i].families.compute, infos[i].families.transfer);
         }
 
         int32_t best_score = -1;
@@ -232,12 +238,8 @@ void vdestroy_device(vstate* v) {
 //=========================================================
 
 VkResult vcreate_surface_xcb(vstate* v, void* wnd_native) {
-    unimplemented(vcreate_surface_xcb) unused(v);
-    unused(wnd_native);
-    return VK_ERROR_UNKNOWN;
-}
-VkResult vcreate_surface_win32(vstate* v, void* wnd_native) {
-    unimplemented(vcreate_surface_win32) unused(v);
+    unimplemented(vcreate_surface_xcb);
+    unused(v);
     unused(wnd_native);
     return VK_ERROR_UNKNOWN;
 }
